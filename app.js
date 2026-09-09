@@ -16,7 +16,7 @@ const SUPABASE_ANON = 'sb_publishable_M7E5CM1w-VaSXQk9SegSEg_kASWuVEO';
    la URL que termina en /exec y la misma clave que pusiste ahí.
    Mientras estén vacíos, el botón Correo abre el cliente de correo
    como hasta ahora.                                              */
-const ENVIO_URL   = 'https://script.google.com/a/macros/imm.gub.uy/s/AKfycbxhNcfVyUk4rBK9TGBhHdhnasBZRqgdM4OvrD9vTptdpnsyY0koFwlet7AjJqJG9vXL/exec';
+const ENVIO_URL   = 'https://script.google.com/macros/s/AKfycbxhNcfVyUk4rBK9TGBhHdhnasBZRqgdM4OvrD9vTptdpnsyY0koFwlet7AjJqJG9vXL/exec';
 const ENVIO_CLAVE = 'violeta316';
 /* ---------------------------------------------------------------- */
 

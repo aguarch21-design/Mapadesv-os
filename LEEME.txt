@@ -1,0 +1,212 @@
+SISTEMA DE DESVIOS STM - UPTU / Division Transporte
+====================================================
+
+QUE ES
+  Un unico link, siempre el mismo, donde el personal en calle ve los desvios
+  vigentes. Las modificaciones las hacen solo las personas habilitadas.
+  Cuando se publica un cambio, todos lo ven al refrescar: no hace falta
+  repartir un link nuevo nunca mas.
+
+  SITIO PRIVADO: para ver los desvios hay que ingresar con cuenta. Sin sesion
+  no se muestra nada, y la base tampoco entrega datos. La sesion queda
+  guardada en el celular, asi que cada persona ingresa una sola vez.
+
+CONTENIDO
+  index.html   la aplicacion
+  app.js       la logica (aca se configura la conexion)
+  vendor/      librerias incluidas (mapa, Supabase, PDF, logo IM)
+  datos/       paradas, lineas y trazados (solo los usa el editor)
+  sql/         el script de la base de datos
+
+  Para publicar en Netlify se sube la carpeta entera. Las subcarpetas sql/ y
+  su contenido no molestan: no se usan desde la web.
+
+PASO 1 - BASE DE DATOS
+  En Supabase -> SQL Editor -> New query, pegar y ejecutar:
+      sql/desvios-supabase-completo.sql
+  Es un unico script que deja la base entera lista. Se puede correr las veces
+  que haga falta: no borra datos ni duplica nada. Reemplaza a los scripts
+  sueltos anteriores (ajustes 1 a 6): si ya se corrieron, igual conviene
+  ejecutarlo una vez para quedar al dia.
+
+PASO 2 - CONFIGURAR
+  Abrir app.js y completar las dos primeras lineas con los datos de
+  Supabase (Settings -> API):
+     SUPABASE_URL  = 'https://xxxxx.supabase.co'
+     SUPABASE_ANON = 'eyJhbGci...'   (la clave "anon public")
+  La clave anon es segura de publicar: los permisos estan en la base.
+
+PASO 3 - DAR ACCESO A LAS PERSONAS
+  Hay dos niveles.
+
+  SOLO CONSULTAR (personal en calle):
+    Supabase -> Authentication -> Users -> Add user
+    Email + contraseña, marcando "Auto Confirm User". Nada mas.
+    Con eso ve los desvios activos, pero no puede modificar nada.
+
+  EDITAR (quienes cargan desvios):
+    a) el mismo Add user de arriba, y ademas
+    b) Supabase -> SQL Editor:
+       insert into public.editores (email, nombre, rol)
+       values ('persona@imm.gub.uy', 'Nombre Apellido', 'editor');
+
+  PARA SACARLE EL ACCESO A ALGUIEN:
+    Borrar su usuario en Authentication -> Users (deja de entrar), y si estaba
+    como editor, borrar tambien su fila de la tabla editores.
+
+PASO 4 - PUBLICAR EN GITHUB PAGES
+  1. En github.com -> New repository
+       Nombre: desvios-stm    (o el que se prefiera)
+       Publico
+       Sin README (esta carpeta ya trae uno)
+  2. En el repositorio recien creado: "uploading an existing file"
+     Arrastrar TODO el contenido de esta carpeta (los archivos y las
+     carpetas datos, sql y vendor). Commit.
+  3. Settings -> Pages
+       Source: Deploy from a branch
+       Branch: main   /(root)     -> Save
+  4. Esperar un minuto. La direccion queda:
+       https://USUARIO.github.io/desvios-stm/
+     Esa es la que se reparte al equipo.
+
+  IMPORTANTE: el archivo .nojekyll tiene que subir si o si (es invisible en
+  Windows: activar "Elementos ocultos" en la pestaña Vista del explorador).
+  Sin el, GitHub ignora algunas carpetas y el sitio no carga.
+
+  PARA ACTUALIZAR MAS ADELANTE
+    Entrar al repositorio, "Add file" -> "Upload files", arrastrar los
+    archivos cambiados y hacer commit. En un minuto queda publicado.
+    Cada version queda guardada en el historial del repositorio.
+
+COMO SE USA
+  Ver (cualquiera, sin cuenta):
+    - lista de desvios activos y mapa
+    - dorado oscuro punteado = recorrido provisorio
+    - gris oscuro = recorrido habitual de la linea
+    - rojo = paradas suspendidas
+    - verde = paradas provisorias
+    - se actualiza solo cada 45 segundos y al volver a la pantalla
+
+  Mientras se edita, el mapa muestra unicamente la propuesta en curso: los
+  desvios ya publicados se ocultan para no confundirse. Al cerrar el editor
+  vuelven a aparecer.
+
+  Editar (solo habilitados):
+    1. Ingresar con correo y contraseña
+    2. "+ Nuevo desvio"
+    3. En "Calle o cruce afectado" escribir la calle ("Av. Italia") o el
+       cruce ("Av. Italia y Ricaldoni"). Con el cruce la busqueda se acota
+       a esa esquina. Si no existe una parada con ese nombre exacto, se
+       muestran las de la primera calle que estan a menos de 500 m de la
+       segunda.
+       Aparecen las lineas ordenadas por cuantas paradas tienen ahi, y las
+       paradas se marcan en violeta en el mapa.
+       TOCAR TODAS LAS LINEAS QUE SE DESVIAN: un mismo desvio puede afectar
+       a varias. Si se desvian todas las del cruce, el boton "Todas se
+       desvian (N)" las agrega de una; "Quitar todas" las saca.
+       El trazado y las paradas suspendidas valen para todas las lineas
+       elegidas: se marcan una sola vez. Las elegidas quedan listadas en "Recorridos afectados" y se
+       pueden quitar con la cruz.
+       Si hace falta sumar una linea que no pasa por ese cruce, usar
+       "Agregar una linea a mano".
+       Los campos Principal y Entre se completan solos con lo que se escribio
+       en la busqueda; conviene revisarlos porque salen tal cual en el PDF.
+       El campo Recorrido se escribe solo: por cada punto marcado se consulta
+       el nombre de la calle sobre la que cae y se va armando el texto. Eso no
+       modifica el trazado, solo lo describe. Se puede corregir a mano: desde
+       el momento en que se edita, deja de reescribirse.
+       El boton "Rehacer calles" vuelve a consultarlas todas y sobrescribe lo
+       que haya, por si conviene empezar de nuevo.
+       Los nombres vienen de OpenStreetMap y a veces son mas largos de lo
+       habitual ("Doctor Americo Ricaldoni" en vez de "Ricaldoni").
+       Si en el item Linea aparece "(ambos sentidos)" es porque se eligieron
+       recorridos de ida y de vuelta de la misma linea.
+    4. Herramientas:
+       - Recorrido provisorio: tocar el mapa punto por punto. La linea queda
+         exactamente por donde se marca: el programa no propone ni corrige
+         caminos. Para que siga bien las calles, marcar un punto en cada
+         esquina donde el recorrido dobla.
+       - Paradas suspendidas: tocar las paradas de la linea
+       - Parada provisoria: tocar donde va y escribir la referencia
+    5. Completar titulo, motivo, desde/hasta y observaciones
+    6. "Guardar borrador" (no se publica) o "Publicar" (lo ven todos)
+    7. Cuando el corte termina: abrir el desvio y "Finalizar"
+
+SOBRE EL RUTEO POR CALLES
+  Cuando "Seguir las calles" esta activado, cada tramo entre dos puntos que
+  tocas se calcula con OpenStreetMap usando perfil de auto: respeta sentidos
+  unicos y elige el camino de menor tiempo estimado. NO sabe de carriles
+  exclusivos de omnibus, giros prohibidos para vehiculos largos ni transito
+  real. Si manda por una calle que no corresponde, marcar un punto en cada
+  esquina donde el recorrido dobla, o destildar la opcion y trazar a mano.
+
+PASO 5 - ENVIO AUTOMATICO DE CORREO (opcional)
+  Permite que el boton Correo mande la comunicacion con el PDF adjunto, desde
+  una casilla @imm.gub.uy, sin pasar por el cliente de correo.
+  1. Abrir envio-correo-apps-script.gs y seguir las instrucciones que tiene
+     adentro (se instala en script.google.com con la cuenta institucional
+     desde la que deben salir los correos).
+  2. Copiar la URL de la implementacion y la clave que se eligio.
+  3. Pegarlas en app.js, en ENVIO_URL y ENVIO_CLAVE.
+  4. Volver a subir la carpeta a Netlify.
+  Las casillas se controlan en DOS lugares y tienen que coincidir: la tabla
+  destinatarios de Supabase (a quienes se les manda) y la lista CASILLAS del
+  script (unicas casillas que el script acepta). Esa doble lista es a
+  proposito: aunque alguien descubra la URL del script, no puede usarlo para
+  mandar correo a cualquier lado.
+
+
+COMUNICAR EL DESVIO (PDF Y CORREO)
+  Con un desvio seleccionado en la lista:
+    PDF     descarga la comunicacion con el formulario oficial de UPTU:
+            membrete de la Intendencia, cuadro DESVIO y los ocho items
+            (Principal, Entre, Fecha, Motivo, Linea, Recorrido, Paradas
+            Suspendidas, Parada Provisoria, Observaciones), cierre "U. P. T. U." y pie
+            con la direccion. Las paradas salen con codigo y esquina.
+    Correo  envia la comunicacion CON EL PDF ADJUNTO a las casillas cargadas
+            en la tabla destinatarios. Pide confirmacion mostrando a quienes
+            va a ir, y avisa en pantalla cuando salio.
+            Esto requiere haber instalado envio-correo-apps-script.gs (ver
+            PASO 5). Si no esta configurado, el boton abre el cliente de
+            correo con todo cargado y el envio se hace a mano.
+            Google no permite al navegador leer la respuesta de sus scripts,
+            asi que el aviso puede decir que no se pudo confirmar. El correo
+            igual salio: para verificarlo esta la planilla "Envios de desvios
+            - UPTU" que el script crea en el Drive de la cuenta que lo instalo.
+    Copiar  copia el mismo texto al portapapeles.
+  Las casillas se administran en Supabase, tabla destinatarios: agregar o
+  borrar filas. Poner activo = false para dejar a alguien fuera sin borrarlo.
+
+SEGURIDAD - LO QUE HAY QUE MANTENER
+  1. REGISTROS PUBLICOS DESACTIVADOS.
+     Supabase -> Authentication -> Providers -> Email:
+     "Allow new users to sign up" tiene que estar APAGADO.
+     Si esta prendido, cualquiera se crea una cuenta y, al quedar
+     autenticado, puede ver todos los desvios. Es lo mas importante.
+
+  2. LA CLAVE DEL SCRIPT (ENVIO_CLAVE) ES PUBLICA.
+     Esta dentro de app.js, que cualquiera puede descargar. Por eso:
+       - NUNCA usar ahi una contraseña personal ni una que se use en otro
+         servicio. Tiene que ser una cadena al azar y de uso unico.
+       - Lo que la protege es la lista CASILLAS del script: aunque alguien
+         la conozca, solo puede mandar correo a esas casillas.
+     Para cambiarla: nueva cadena en el .gs, misma cadena en app.js,
+     reimplementar el script y volver a subir la carpeta.
+
+  3. UNA CONTRASEÑA POR PERSONA, SIN REUTILIZAR.
+     Verificacion en dos pasos activada en las cuentas de Supabase y Netlify,
+     que son las que controlan todo el sistema.
+
+  4. AL DAR DE BAJA A ALGUIEN: borrar su usuario en Authentication y, si era
+     editor, su fila en la tabla editores.
+
+  5. El archivo _headers de esta carpeta agrega protecciones del navegador.
+     No borrarlo. Si algun dia se cambia de proyecto Supabase o se agrega un
+     servicio externo, hay que actualizar la linea Content-Security-Policy.
+
+NOTAS
+  - Los borradores solo los ven los editores.
+  - Cada cambio queda registrado en la tabla desvios_historial: quien, cuando
+    y como estaba antes.
+  - El visor no descarga la base de paradas: al publicar se guarda todo lo
+    necesario dentro del desvio. Por eso abre rapido con datos moviles.

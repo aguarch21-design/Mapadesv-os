@@ -16,7 +16,11 @@ const SUPABASE_ANON = 'sb_publishable_M7E5CM1w-VaSXQk9SegSEg_kASWuVEO';
    la URL que termina en /exec y la misma clave que pusiste ahí.
    Mientras estén vacíos, el botón Correo abre el cliente de correo
    como hasta ahora.                                              */
-const ENVIO_URL   = 'https://script.google.com/macros/s/AKfycbxhNcfVyUk4rBK9TGBhHdhnasBZRqgdM4OvrD9vTptdpnsyY0koFwlet7AjJqJG9vXL/exec';
+// MODO MANUAL: el botón Correo abre el correo con todo cargado.
+// Cuando Informática habilite la publicación "Cualquier usuario" en Apps
+// Script, alcanza con poner acá la URL de la implementación y vuelve a
+// enviarse solo. La clave de abajo ya coincide con la del script.
+const ENVIO_URL   = '';   // ej.: 'https://script.google.com/macros/s/AKfy.../exec'
 const ENVIO_CLAVE = 'cachorromalvado';
 /* ---------------------------------------------------------------- */
 
@@ -453,12 +457,6 @@ function enviarPorCorreo(d){
     aviso('No hay casillas cargadas. Agregalas en la tabla destinatarios de Supabase.', 'err');
     return;
   }
-  // Sin envío configurado: se abre el cliente de correo, como antes.
-  if(!ENVIO_URL || !ENVIO_CLAVE){
-    const todas = DESTINATARIOS.map(function(x){ return x.email; });
-    abrirCliente(d, todas);
-    return;
-  }
   elegirCasillas(d);
 }
 
@@ -492,6 +490,9 @@ function elegirCasillas(d){
     cont.appendChild(fila);
   }
   $('envioTitulo').textContent = 'Enviar comunicación';
+  $('envioNota').textContent = (ENVIO_URL && ENVIO_CLAVE)
+    ? 'Se envía el texto del desvío con el PDF adjunto. Elegí a qué casillas:'
+    : 'Se abrirá tu correo con el texto y las casillas ya cargadas, para que lo revises y lo envíes. El PDF se adjunta a mano (botón PDF). Elegí a qué casillas:';
   $('envio').classList.add('on');
   $('envio').dataset.desvio = d.id || '';
   window.__envioDesvio = d;
@@ -504,6 +505,13 @@ async function confirmarEnvio(){
     .map(function(i){ return i.value; });
   if(!para.length){ aviso('Elegí al menos una casilla', 'err'); return; }
   $('envio').classList.remove('on');
+
+  // Sin envío automático configurado: se abre el correo con todo cargado.
+  if(!ENVIO_URL || !ENVIO_CLAVE){
+    abrirCliente(d, para);
+    aviso('Se abrió el correo con el texto y las casillas. Acordate de adjuntar el PDF con el botón de al lado.', 'ok');
+    return;
+  }
 
   const ls = (d.lineas && d.lineas.length) ? d.lineas : [d.linea];
   const asunto = 'Desvío ' + (ls.length === 1 ? 'línea ' : 'líneas ') + ls.join(', ') + ' — ' + (d.titulo || '');

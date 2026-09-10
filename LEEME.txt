@@ -163,9 +163,10 @@ COMUNICAR EL DESVIO (PDF Y CORREO)
             (Principal, Entre, Fecha, Motivo, Linea, Recorrido, Paradas
             Suspendidas, Parada Provisoria, Observaciones), cierre "U. P. T. U." y pie
             con la direccion. Las paradas salen con codigo y esquina.
-    Correo  envia la comunicacion CON EL PDF ADJUNTO a las casillas cargadas
-            en la tabla destinatarios. Pide confirmacion mostrando a quienes
-            va a ir, y avisa en pantalla cuando salio.
+    Correo  abre la lista de casillas cargadas en la tabla destinatarios,
+            todas marcadas. Se destildan las que no correspondan y se toca
+            Enviar: sale la comunicacion CON EL PDF ADJUNTO solo a las
+            elegidas. El boton "Todas / ninguna" marca o desmarca de una.
             Esto requiere haber instalado envio-correo-apps-script.gs (ver
             PASO 5). Si no esta configurado, el boton abre el cliente de
             correo con todo cargado y el envio se hace a mano.

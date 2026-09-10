@@ -448,33 +448,66 @@ function generarPDF(d, devolver){
   return true;
 }
 
-async function enviarPorCorreo(d){
-  const para = DESTINATARIOS.map(function(x){ return x.email; });
-  const ls = (d.lineas && d.lineas.length) ? d.lineas : [d.linea];
-  const asunto = 'Desvío ' + (ls.length === 1 ? 'línea ' : 'líneas ') + ls.join(', ') + ' — ' + (d.titulo || '');
-  const cuerpo = textoDesvio(d);
-
-  if(!para.length){
+function enviarPorCorreo(d){
+  if(!DESTINATARIOS.length){
     aviso('No hay casillas cargadas. Agregalas en la tabla destinatarios de Supabase.', 'err');
     return;
   }
-
   // Sin envío configurado: se abre el cliente de correo, como antes.
   if(!ENVIO_URL || !ENVIO_CLAVE){
-    const url = 'mailto:' + encodeURIComponent(para.join(',')) +
-      '?subject=' + encodeURIComponent(asunto) + '&body=' + encodeURIComponent(cuerpo);
-    if(url.length > 1900){
-      if(navigator.clipboard) navigator.clipboard.writeText(cuerpo);
-      aviso('El texto es largo: quedó copiado al portapapeles para pegarlo en el correo.', 'ok');
-      window.open('mailto:' + encodeURIComponent(para.join(',')) + '?subject=' + encodeURIComponent(asunto), '_blank');
-      return;
-    }
-    window.location.href = url;
+    const todas = DESTINATARIOS.map(function(x){ return x.email; });
+    abrirCliente(d, todas);
     return;
   }
+  elegirCasillas(d);
+}
 
-  if(!confirm('Se va a enviar la comunicación con el PDF adjunto a:\n\n' +
-      para.join('\n') + '\n\n¿Confirmás el envío?')) return;
+function abrirCliente(d, para){
+  const ls = (d.lineas && d.lineas.length) ? d.lineas : [d.linea];
+  const asunto = 'Desvío ' + (ls.length === 1 ? 'línea ' : 'líneas ') + ls.join(', ') + ' — ' + (d.titulo || '');
+  const cuerpo = textoDesvio(d);
+  const url = 'mailto:' + encodeURIComponent(para.join(',')) +
+    '?subject=' + encodeURIComponent(asunto) + '&body=' + encodeURIComponent(cuerpo);
+  if(url.length > 1900){
+    if(navigator.clipboard) navigator.clipboard.writeText(cuerpo);
+    aviso('El texto es largo: quedó copiado al portapapeles para pegarlo en el correo.', 'ok');
+    window.open('mailto:' + encodeURIComponent(para.join(',')) + '?subject=' + encodeURIComponent(asunto), '_blank');
+    return;
+  }
+  window.location.href = url;
+}
+
+// Lista de casillas con tilde, para elegir a quiénes se comunica este desvío.
+function elegirCasillas(d){
+  const cont = $('envioLista');
+  cont.innerHTML = '';
+  for(const dest of DESTINATARIOS){
+    const id = 'dest_' + dest.email.replace(/[^a-z0-9]/gi, '');
+    const fila = document.createElement('label');
+    fila.className = 'tgl';
+    fila.innerHTML = '<input type="checkbox" checked><span></span>';
+    fila.querySelector('input').value = dest.email;
+    fila.querySelector('input').id = id;
+    fila.querySelector('span').textContent = (dest.nombre ? dest.nombre + ' — ' : '') + dest.email;
+    cont.appendChild(fila);
+  }
+  $('envioTitulo').textContent = 'Enviar comunicación';
+  $('envio').classList.add('on');
+  $('envio').dataset.desvio = d.id || '';
+  window.__envioDesvio = d;
+}
+
+async function confirmarEnvio(){
+  const d = window.__envioDesvio;
+  if(!d) return;
+  const para = Array.prototype.slice.call($('envioLista').querySelectorAll('input:checked'))
+    .map(function(i){ return i.value; });
+  if(!para.length){ aviso('Elegí al menos una casilla', 'err'); return; }
+  $('envio').classList.remove('on');
+
+  const ls = (d.lineas && d.lineas.length) ? d.lineas : [d.linea];
+  const asunto = 'Desvío ' + (ls.length === 1 ? 'línea ' : 'líneas ') + ls.join(', ') + ' — ' + (d.titulo || '');
+  const cuerpo = textoDesvio(d);
 
   const btn = $('btnCorreo');
   btn.disabled = true; btn.textContent = 'Enviando…';
@@ -483,7 +516,6 @@ async function enviarPorCorreo(d){
     cuerpo: cuerpo, pdf: pdf, nombrePdf: nombrePDF(d), quien: (sesion && sesion.user.email) || ''});
 
   try{
-    // Intento normal: si responde, se sabe con certeza qué pasó.
     const r = await fetch(ENVIO_URL, {
       method: 'POST',
       headers: {'Content-Type': 'text/plain;charset=utf-8'},
@@ -493,16 +525,15 @@ async function enviarPorCorreo(d){
     if(j.ok) aviso('Comunicación enviada a ' + j.enviados + (j.enviados === 1 ? ' casilla' : ' casillas'), 'ok');
     else aviso('No se pudo enviar: ' + (j.error || 'error desconocido'), 'err');
   }catch(err){
-    // Google responde a los POST con un redirect que el navegador no deja leer.
-    // Se reenvía sin esperar respuesta: el correo sale igual, pero sin confirmación.
+    // Google no permite al navegador leer su respuesta: se reenvía sin esperarla.
     try{
       await fetch(ENVIO_URL, {
-        method: 'POST',
-        mode: 'no-cors',
+        method: 'POST', mode: 'no-cors',
         headers: {'Content-Type': 'text/plain;charset=utf-8'},
         body: cuerpoPedido
       });
-      aviso('Comunicación enviada a ' + para.length + (para.length === 1 ? ' casilla' : ' casillas') + '. Si querés verificar el envío, está registrado en la planilla del Drive.', 'ok');
+      aviso('Comunicación enviada a ' + para.length + (para.length === 1 ? ' casilla' : ' casillas') +
+        '. Si querés verificar el envío, está registrado en la planilla del Drive.', 'ok');
     }catch(err2){
       aviso('No se pudo enviar: ' + err2.message, 'err');
     }
@@ -1217,6 +1248,13 @@ async function iniciar(){
   $('btnCorreo').onclick = ()=>{
     if(!seleccionado){ aviso('Elegí primero un desvío de la lista', 'err'); return; }
     enviarPorCorreo(seleccionado);
+  };
+  $('envioConfirmar').onclick = confirmarEnvio;
+  $('envioCancelar').onclick = ()=> $('envio').classList.remove('on');
+  $('envioTodas').onclick = ()=>{
+    const cajas = $('envioLista').querySelectorAll('input');
+    const todas = Array.prototype.every.call(cajas, function(i){ return i.checked; });
+    Array.prototype.forEach.call(cajas, function(i){ i.checked = !todas; });
   };
   $('btnCopiar').onclick = ()=>{
     if(!seleccionado){ aviso('Elegí primero un desvío de la lista', 'err'); return; }

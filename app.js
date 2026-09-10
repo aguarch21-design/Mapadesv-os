@@ -17,7 +17,7 @@ const SUPABASE_ANON = 'sb_publishable_M7E5CM1w-VaSXQk9SegSEg_kASWuVEO';
    Mientras estén vacíos, el botón Correo abre el cliente de correo
    como hasta ahora.                                              */
 const ENVIO_URL   = 'https://script.google.com/macros/s/AKfycbxhNcfVyUk4rBK9TGBhHdhnasBZRqgdM4OvrD9vTptdpnsyY0koFwlet7AjJqJG9vXL/exec';
-const ENVIO_CLAVE = 'violeta316';
+const ENVIO_CLAVE = 'cachorromalvado';
 /* ---------------------------------------------------------------- */
 
 const REFRESCO_MS = 45000;
@@ -502,7 +502,7 @@ async function enviarPorCorreo(d){
         headers: {'Content-Type': 'text/plain;charset=utf-8'},
         body: cuerpoPedido
       });
-      aviso('Comunicación enviada. El navegador no permite confirmar la respuesta: si querés verificarlo, revisá la planilla de envíos.', 'ok');
+      aviso('Comunicación enviada a ' + para.length + (para.length === 1 ? ' casilla' : ' casillas') + '. Si querés verificar el envío, está registrado en la planilla del Drive.', 'ok');
     }catch(err2){
       aviso('No se pudo enviar: ' + err2.message, 'err');
     }

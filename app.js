@@ -126,11 +126,145 @@ function fechaCorta(iso){
     ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
 }
 
+
+/* ================= MAPA DE FONDO ================= */
+const PROVEEDORES = [
+  {n:'Esri', u:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+   a:'&copy; Esri', max:19},
+  {n:'Esri satelital', u:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+   a:'&copy; Esri', max:19},
+  {n:'MonteviMap · vías', wms:true,
+   url:'https://montevideo.gub.uy/app/geoserver/mapstore-base/wms',
+   opts:{layers:'mapstore-base:cb_v_sig_vias', format:'image/png', transparent:false,
+         version:'1.1.1', attribution:'Intendencia de Montevideo'}},
+  {n:'MonteviMap · vías (alternativa)', wms:true,
+   url:'https://montevideo.gub.uy/app/geoserver/wms',
+   opts:{layers:'mapstore-base:cb_v_sig_vias', format:'image/png', transparent:false,
+         version:'1.1.1', attribution:'Intendencia de Montevideo'}},
+  {n:'Carto (claro)', u:'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+   a:'&copy; OpenStreetMap, &copy; CARTO', max:20},
+  {n:'OpenStreetMap', u:'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+   a:'&copy; OpenStreetMap', max:19},
+  {n:'Sin fondo', u:'', a:'', max:19}
+];
+let capaFondo = null;
+
+function fondoGuardado(){
+  try{
+    const g = localStorage.getItem('desvios_fondo');
+    const i = g === null ? 0 : parseInt(g, 10);
+    return (i >= 0 && i < PROVEEDORES.length) ? i : 0;
+  }catch(e){ return 0; }
+}
+
+function ponerFondo(i){
+  if(capaFondo){ mapa.removeLayer(capaFondo); capaFondo = null; }
+  try{ localStorage.setItem('desvios_fondo', String(i)); }catch(e){}
+  const p = PROVEEDORES[i] || PROVEEDORES[0];
+  if(p.wms) capaFondo = L.tileLayer.wms(p.url, p.opts);
+  else if(p.u) capaFondo = L.tileLayer(p.u, {maxZoom:p.max, attribution:p.a});
+  else return;
+  capaFondo.addTo(mapa);
+  if(capaFondo.bringToBack) capaFondo.bringToBack();
+}
+
+// control propio sobre el mapa, para no ocupar lugar en el panel
+function armarSelectorFondo(){
+  const ctl = L.control({position:'topright'});
+  ctl.onAdd = function(){
+    const div = L.DomUtil.create('div', 'ctlFondo');
+    let html = '<select id="selFondo" title="Mapa de fondo">';
+    PROVEEDORES.forEach(function(p, i){ html += '<option value="' + i + '">' + p.n + '</option>'; });
+    html += '</select><label><input type="checkbox" id="verCalles" checked> calles</label>';
+    div.innerHTML = html;
+    L.DomEvent.disableClickPropagation(div);
+    return div;
+  };
+  ctl.addTo(mapa);
+  const sel = document.getElementById('selFondo');
+  sel.value = String(fondoGuardado());
+  sel.onchange = function(){ ponerFondo(parseInt(sel.value, 10)); };
+  const chk = document.getElementById('verCalles');
+  try{ if(localStorage.getItem('desvios_calles') === '0'){ chk.checked = false; callesOn = false; } }catch(e){}
+  chk.onchange = function(){
+    callesOn = chk.checked;
+    try{ localStorage.setItem('desvios_calles', callesOn ? '1' : '0'); }catch(e){}
+    dibujarNombresCalles();
+  };
+  mapa.on('moveend zoomend', pedirDibujoCalles);
+  dibujarNombresCalles();
+}
+
+/* ================= NOMBRES DE CALLES (datos propios, sin red) ================= */
+let capaCalles = null, callesOn = true, tempCalles = null;
+
+function pedirDibujoCalles(){
+  clearTimeout(tempCalles);
+  tempCalles = setTimeout(dibujarNombresCalles, 90);
+}
+
+let callesPedidas = false;
+// Los nombres de calles pesan ~700 KB: se descargan recién cuando se necesitan
+// (al acercarse), para que el visor abra liviano en el celular.
+function asegurarCalles(){
+  if(typeof CALLES !== 'undefined' || callesPedidas) return;
+  callesPedidas = true;
+  const s = document.createElement('script');
+  s.src = 'datos/calles.js';
+  s.onload = function(){ dibujarNombresCalles(); };
+  document.head.appendChild(s);
+}
+
+function dibujarNombresCalles(){
+  if(!callesOn){ if(capaCalles){ capaCalles.remove(); capaCalles = null; } return; }
+  const z = mapa.getZoom();
+  if(z >= 14) asegurarCalles();
+  if(typeof CALLES === 'undefined') return;
+  if(!capaCalles){ capaCalles = L.layerGroup().addTo(mapa); }
+  capaCalles.clearLayers();
+  if(z < 14) return;
+  const minLargo = z >= 17 ? 0 : (z >= 16 ? 400 : (z >= 15 ? 1200 : 3000));
+  const verFlechas = z >= 16;
+  const b = mapa.getBounds().pad(0.08);
+  const cand = [];
+  for(const c of CALLES){
+    if(c[4] < minLargo) continue;
+    if(!b.contains([c[1], c[2]])) continue;
+    cand.push(c);
+    if(cand.length > 1500) break;
+  }
+  cand.sort(function(a, b2){ return b2[4] - a[4]; });
+  const puestas = [];
+  const MAX = 110, SEP = 240;
+  for(const c of cand){
+    const p = mapa.latLngToContainerPoint([c[1], c[2]]);
+    const nom = CALLES_N[c[0]];
+    const ancho = Math.max(28, nom.length * 5.4) + (verFlechas && c[5] != null ? 14 : 0);
+    const radio = ancho / 2 + 5;
+    let choca = false;
+    for(const q of puestas){
+      const dx = q.x - p.x, dy = q.y - p.y;
+      if(q.nom === c[0]){ if(dx*dx + dy*dy < SEP*SEP){ choca = true; break; } }
+      else if(Math.abs(dy) < 13 && Math.abs(dx) < q.radio + radio){ choca = true; break; }
+    }
+    if(choca) continue;
+    puestas.push({x:p.x, y:p.y, radio:radio, nom:c[0]});
+    const flecha = (verFlechas && c[5] != null)
+      ? '<i style="transform:rotate(' + c[5] + 'deg)">\u2192</i>' : '';
+    capaCalles.addLayer(L.marker([c[1], c[2]], {interactive:false, icon: L.divIcon({
+      className:'etqCalle',
+      html:'<span style="transform:rotate(' + c[3] + 'deg)">' + nom + flecha + '</span>',
+      iconSize:[0,0]
+    })}));
+    if(puestas.length >= MAX) break;
+  }
+}
+
 /* ================= MAPA ================= */
 function iniciarMapa(){
   mapa = L.map('map', {preferCanvas:true, zoomControl:true}).setView([-34.87,-56.17], 12);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    {maxZoom:19, attribution:'&copy; OpenStreetMap'}).addTo(mapa);
+  ponerFondo(fondoGuardado());
+  armarSelectorFondo();
   renderer = L.canvas({padding:.4});
   capaDesvios = L.layerGroup().addTo(mapa);
   capaEdicion = L.layerGroup().addTo(mapa);

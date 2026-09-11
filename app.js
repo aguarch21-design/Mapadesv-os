@@ -170,7 +170,7 @@ function ponerFondo(i){
 
 // control propio sobre el mapa, para no ocupar lugar en el panel
 function armarSelectorFondo(){
-  const ctl = L.control({position:'topright'});
+  const ctl = L.control({position:'topleft'});
   ctl.onAdd = function(){
     const div = L.DomUtil.create('div', 'ctlFondo');
     let html = '<select id="selFondo" title="Mapa de fondo">';
@@ -212,6 +212,9 @@ function asegurarCalles(){
   const s = document.createElement('script');
   s.src = 'datos/calles.js';
   s.onload = function(){ dibujarNombresCalles(); };
+  s.onerror = function(){
+    aviso('No se encontró datos/calles.js: los nombres de calles no se van a mostrar.', 'err');
+  };
   document.head.appendChild(s);
 }
 

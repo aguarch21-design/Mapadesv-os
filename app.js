@@ -129,10 +129,6 @@ function fechaCorta(iso){
 
 /* ================= MAPA DE FONDO ================= */
 const PROVEEDORES = [
-  {n:'Esri', u:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
-   a:'&copy; Esri', max:19},
-  {n:'Esri satelital', u:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-   a:'&copy; Esri', max:19},
   {n:'MonteviMap · vías', wms:true,
    url:'https://montevideo.gub.uy/app/geoserver/mapstore-base/wms',
    opts:{layers:'mapstore-base:cb_v_sig_vias', format:'image/png', transparent:false,
@@ -141,6 +137,10 @@ const PROVEEDORES = [
    url:'https://montevideo.gub.uy/app/geoserver/wms',
    opts:{layers:'mapstore-base:cb_v_sig_vias', format:'image/png', transparent:false,
          version:'1.1.1', attribution:'Intendencia de Montevideo'}},
+  {n:'Esri', u:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+   a:'&copy; Esri', max:19},
+  {n:'Esri satelital', u:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+   a:'&copy; Esri', max:19},
   {n:'Carto (claro)', u:'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
    a:'&copy; OpenStreetMap, &copy; CARTO', max:20},
   {n:'OpenStreetMap', u:'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -151,7 +151,7 @@ let capaFondo = null;
 
 function fondoGuardado(){
   try{
-    const g = localStorage.getItem('desvios_fondo');
+    const g = localStorage.getItem('desvios_fondo_v2');
     const i = g === null ? 0 : parseInt(g, 10);
     return (i >= 0 && i < PROVEEDORES.length) ? i : 0;
   }catch(e){ return 0; }
@@ -159,7 +159,7 @@ function fondoGuardado(){
 
 function ponerFondo(i){
   if(capaFondo){ mapa.removeLayer(capaFondo); capaFondo = null; }
-  try{ localStorage.setItem('desvios_fondo', String(i)); }catch(e){}
+  try{ localStorage.setItem('desvios_fondo_v2', String(i)); }catch(e){}
   const p = PROVEEDORES[i] || PROVEEDORES[0];
   if(p.wms) capaFondo = L.tileLayer.wms(p.url, p.opts);
   else if(p.u) capaFondo = L.tileLayer(p.u, {maxZoom:p.max, attribution:p.a});

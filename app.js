@@ -119,6 +119,35 @@ function hace(iso){
   return 'hace ' + Math.round(h/24) + ' días';
 }
 
+
+/* ---------- fechas en formato uruguayo (dd/mm/aaaa hh:mm) ---------- */
+function fechaAtexto(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  if(isNaN(d)) return '';
+  const dd = String(d.getDate()).padStart(2,'0');
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mi = String(d.getMinutes()).padStart(2,'0');
+  return dd + '/' + mm + '/' + d.getFullYear() + ' ' + hh + ':' + mi;
+}
+
+// Acepta 5/9, 5/9/26, 05/09/2026, con o sin hora, y separadores / - .
+function textoAfecha(txt){
+  const s = String(txt || '').trim();
+  if(!s) return null;
+  const m = s.match(/^(\d{1,2})[\/\-. ](\d{1,2})(?:[\/\-. ](\d{2,4}))?(?:[\s,]+(\d{1,2})[:.](\d{2}))?$/);
+  if(!m) return undefined;                 // escrito mal
+  const dia = +m[1], mes = +m[2];
+  let anio = m[3] ? +m[3] : new Date().getFullYear();
+  if(anio < 100) anio += 2000;
+  const hora = m[4] ? +m[4] : 0, min = m[5] ? +m[5] : 0;
+  if(dia < 1 || dia > 31 || mes < 1 || mes > 12 || hora > 23 || min > 59) return undefined;
+  const d = new Date(anio, mes-1, dia, hora, min);
+  if(isNaN(d) || d.getDate() !== dia || d.getMonth() !== mes-1) return undefined;
+  return d.toISOString();
+}
+
 function fechaCorta(iso){
   if(!iso) return '';
   const d = new Date(iso);
@@ -1095,8 +1124,8 @@ function abrirEditor(){
   $('edPrincipal').value = ed.principal || '';
   $('edEntre').value = ed.entre || '';
   $('edObs').value = ed.observaciones || '';
-  $('edDesde').value = ed.desde ? new Date(ed.desde).toISOString().slice(0,16) : '';
-  $('edHasta').value = ed.hasta ? new Date(ed.hasta).toISOString().slice(0,16) : '';
+  $('edDesde').value = fechaAtexto(ed.desde);
+  $('edHasta').value = fechaAtexto(ed.hasta);
   $('edVariante').innerHTML = '';
   $('calle').value = ''; $('resCalle').innerHTML = '';
   pintarElegidos();
@@ -1335,8 +1364,11 @@ async function guardar(nuevoEstado){
   ed.principal = $('edPrincipal').value.trim();
   ed.entre = $('edEntre').value.trim();
   ed.observaciones = $('edObs').value.trim();
-  ed.desde = $('edDesde').value ? new Date($('edDesde').value).toISOString() : null;
-  ed.hasta = $('edHasta').value ? new Date($('edHasta').value).toISOString() : null;
+  const fd = textoAfecha($('edDesde').value);
+  const fh = textoAfecha($('edHasta').value);
+  if(fd === undefined){ aviso('Revisá la fecha "Desde": va como 05/09/2026 14:30', 'err'); return; }
+  if(fh === undefined){ aviso('Revisá la fecha "Hasta": va como 05/09/2026 14:30', 'err'); return; }
+  ed.desde = fd; ed.hasta = fh;
   if(!ed.linea){ aviso('Elegí al menos una línea afectada', 'err'); return; }
   if(!ed.titulo){ aviso('Falta el título del desvío', 'err'); return; }
   ed.recorrido = recorridoPlano();

@@ -841,8 +841,48 @@ function buscarPorCalle(txt){
     }
   }
   let notaCruce = '';
-  // Si el cruce exacto no figura, buscar las paradas de la primera calle
-  // que estén cerca de la segunda (los nombres de esquina no siempre coinciden).
+  // En un cruce, además de las paradas que se llaman así, se suman las de
+  // ambas calles que estén a menos de 300 m: las líneas que circulan por una
+  // de las dos suelen parar media cuadra antes o después, con otro nombre.
+  if(partes.length > 1){
+    const enA = (window.D_PARADAS || []).filter(function(p){ return !p[6] && sinAcentos(p[1]).indexOf(partes[0]) >= 0; });
+    const enB = (window.D_PARADAS || []).filter(function(p){ return !p[6] && sinAcentos(p[1]).indexOf(partes[1]) >= 0; });
+    // punto del cruce: si hay paradas con el nombre completo, su promedio;
+    // si no, el punto medio entre las dos paradas más cercanas de cada calle
+    let cx = null, cy = null;
+    if(paradasCalle.length){
+      cx = paradasCalle.reduce(function(s,p){ return s + p[3]; }, 0) / paradasCalle.length;
+      cy = paradasCalle.reduce(function(s,p){ return s + p[2]; }, 0) / paradasCalle.length;
+    }else if(enA.length && enB.length){
+      let mejor = Infinity;
+      for(const p of enA) for(const q of enB){
+        const dx = (p[3]-q[3])*KX, dy = (p[2]-q[2])*KY;
+        const d = dx*dx + dy*dy;
+        if(d < mejor){ mejor = d; cx = (p[3]+q[3])/2; cy = (p[2]+q[2])/2; }
+      }
+    }
+    if(cx !== null){
+      const yaEsta = {};
+      for(const p of paradasCalle) yaEsta[p[0]] = true;
+      let sumadas = 0;
+      for(const p of enA.concat(enB)){
+        if(yaEsta[p[0]]) continue;
+        const dx = (p[3]-cx)*KX, dy = (p[2]-cy)*KY;
+        if(dx*dx + dy*dy > 300*300) continue;
+        yaEsta[p[0]] = true;
+        paradasCalle.push(p);
+        sumadas++;
+        const ls = idx.get(p[0]);
+        if(!ls) continue;
+        for(const l of ls){
+          let e = conteo.get(l);
+          if(!e){ e = {n:0, paradas:[]}; conteo.set(l, e); }
+          e.n++; e.paradas.push(p[0]);
+        }
+      }
+      if(sumadas) notaCruce = 'Incluye las paradas de ambas calles a menos de 300 m del cruce. ';
+    }
+  }
   if(!conteo.size && partes.length > 1){
     const enA = (window.D_PARADAS || []).filter(function(p){ return !p[6] && sinAcentos(p[1]).indexOf(partes[0]) >= 0; });
     const enB = (window.D_PARADAS || []).filter(function(p){ return !p[6] && sinAcentos(p[1]).indexOf(partes[1]) >= 0; });

@@ -943,6 +943,59 @@ function buscarPorCalle(txt){
     resaltarParadasCalle([]);
     return;
   }
+
+  // Hay calles homónimas en otras zonas (Florida, Colonia, Rivera...). Las paradas
+  // se encadenan mientras estén a menos de 5 km entre sí: así una avenida larga
+  // queda entera, pero una calle del interior con el mismo nombre queda aparte.
+  let descartadas = 0;
+  if(paradasCalle.length > 2){
+    const n = paradasCalle.length;
+    const grupo = new Array(n).fill(-1);
+    let cuantos = 0;
+    for(let i = 0; i < n; i++){
+      if(grupo[i] >= 0) continue;
+      const g = cuantos++;
+      const cola = [i];
+      grupo[i] = g;
+      while(cola.length){
+        const k = cola.pop();
+        for(let j = 0; j < n; j++){
+          if(grupo[j] >= 0) continue;
+          const dx = (paradasCalle[k][3]-paradasCalle[j][3])*KX;
+          const dy = (paradasCalle[k][2]-paradasCalle[j][2])*KY;
+          if(dx*dx + dy*dy <= 5000*5000){ grupo[j] = g; cola.push(j); }
+        }
+      }
+    }
+    if(cuantos > 1){
+      // se queda el grupo por el que pasan más líneas, no el que tiene más paradas
+      const info = [];
+      for(let g = 0; g < cuantos; g++) info.push({g:g, paradas:[], lineas:new Set()});
+      for(let i = 0; i < n; i++){
+        const inf = info[grupo[i]];
+        inf.paradas.push(paradasCalle[i]);
+        for(const l of (idx.get(paradasCalle[i][0]) || [])) inf.lineas.add(l);
+      }
+      info.sort(function(x, y){ return (y.lineas.size - x.lineas.size) || (y.paradas.length - x.paradas.length); });
+      const principal = info[0].paradas;
+      descartadas = n - principal.length;
+      conteo.clear();
+      paradasCalle.length = 0;
+      for(const p of principal){
+        paradasCalle.push(p);
+        const ls = idx.get(p[0]);
+        if(!ls) continue;
+        for(const l of ls){
+          let e = conteo.get(l);
+          if(!e){ e = {n:0, paradas:[]}; conteo.set(l, e); }
+          e.n++; e.paradas.push(p[0]);
+        }
+      }
+      if(descartadas) notaCruce += 'Hay ' + descartadas + ' parada' + (descartadas===1?'':'s') +
+        ' con ese nombre en otra zona; se muestran las de acá. ';
+    }
+  }
+
   const orden = Array.from(conteo.entries()).sort(function(a,b){
     if(b[1].n !== a[1].n) return b[1].n - a[1].n;
     const na = parseInt(a[0],10), nb = parseInt(b[0],10);

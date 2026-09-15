@@ -850,6 +850,30 @@ function indiceLineas(){
 
 const sinAcentos = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 
+// Devuelve la traza de una variante como una o varias polilíneas.
+// En los recorridos sin trazado oficial los puntos son las paradas: si dos
+// quedan a más de 800 m, el tramo recto entre ellas no representa nada real
+// (hay casos de 10 km cruzando la ciudad), así que se corta ahí.
+function trazaDe(v){
+  const oficial = !!(v[8] && window.D_SHAPES && window.D_SHAPES[v[6]]);
+  const pts = oficial ? decodePolyline(window.D_SHAPES[v[6]])
+                      : v[9].map(coordParada).filter(Boolean);
+  if(oficial) return {oficial:true, partes: pts.length > 1 ? [pts] : []};
+  const partes = [];
+  let actual = [];
+  for(let i = 0; i < pts.length; i++){
+    if(!actual.length){ actual.push(pts[i]); continue; }
+    const a = actual[actual.length-1], b = pts[i];
+    const dx = (b[1]-a[1])*KX, dy = (b[0]-a[0])*KY;
+    if(dx*dx + dy*dy > 800*800){
+      if(actual.length > 1) partes.push(actual);
+      actual = [b];
+    }else actual.push(b);
+  }
+  if(actual.length > 1) partes.push(actual);
+  return {oficial:false, partes: partes};
+}
+
 // ---------- índice de recorridos: qué líneas circulan por cada punto ----------
 let REJILLA = null, TRAZAS = null;
 const CELDA = 0.0012;        // ~130 m
@@ -861,18 +885,18 @@ function indiceRecorridos(){
   TRAZAS = [];
   for(let vi = 0; vi < (window.D_VARS || []).length; vi++){
     const v = D_VARS[vi];
-    const pts = (v[8] && window.D_SHAPES && D_SHAPES[v[6]])
-      ? decodePolyline(D_SHAPES[v[6]])
-      : v[9].map(coordParada).filter(Boolean);
-    TRAZAS.push(pts);
+    const t = trazaDe(v);
+    const pts = [];
+    for(const parte of t.partes){ for(const p of parte) pts.push(p); }
+    TRAZAS.push(t.partes);
     const marcar = function(la, lo){
       const k = Math.round(la/CELDA) + '|' + Math.round(lo/CELDA);
       let s = REJILLA.get(k);
       if(!s){ s = new Set(); REJILLA.set(k, s); }
       s.add(vi);
     };
-    for(let i = 0; i < pts.length; i++){
-      const p = pts[i], q = pts[i+1];
+    for(const parte of t.partes) for(let i = 0; i < parte.length; i++){
+      const p = parte[i], q = parte[i+1];
       marcar(p[0], p[1]);
       if(!q) continue;
       // se marcan también las celdas intermedias: en los recorridos sin trazado
@@ -898,14 +922,11 @@ function distTramo(lat, lon, a, b){
 }
 
 function pasaPor(vi, lat, lon, radio){
-  const pts = TRAZAS[vi], r2 = radio*radio;
-  if(!pts || !pts.length) return false;
-  if(pts.length === 1){
-    const dx = (pts[0][1]-lon)*KX, dy = (pts[0][0]-lat)*KY;
-    return dx*dx + dy*dy <= r2;
-  }
-  for(let i = 0; i < pts.length-1; i++)
-    if(distTramo(lat, lon, pts[i], pts[i+1]) <= r2) return true;
+  const partes = TRAZAS[vi], r2 = radio*radio;
+  if(!partes || !partes.length) return false;
+  for(const pts of partes)
+    for(let i = 0; i < pts.length-1; i++)
+      if(distTramo(lat, lon, pts[i], pts[i+1]) <= r2) return true;
   return false;
 }
 
@@ -1450,17 +1471,12 @@ function dibujarEdicion(){
   if(!ed) return;
   const muchos = ed.vars.length > 5;
   for(const v of ed.vars){
-    const oficial = !!(v[8] && window.D_SHAPES && window.D_SHAPES[v[6]]);
-    const pts = oficial ? decodePolyline(window.D_SHAPES[v[6]])
-                        : v[9].map(coordParada).filter(Boolean);
-    if(pts.length < 2) continue;
-    // Los recorridos sin trazado oficial se dibujan uniendo paradas: cortan
-    // en diagonal por dentro de las manzanas. Se marcan punteados y más tenues
-    // para que no se confundan con el recorrido real.
-    capaEdicion.addLayer(L.polyline(pts, oficial
+    const t = trazaDe(v);
+    const estilo = t.oficial
       ? {color:'#4a5568', weight: muchos ? 2.5 : 4, opacity: muchos ? .5 : .85, interactive:false}
       : {color:'#8a92a6', weight: muchos ? 1.5 : 2, opacity: muchos ? .35 : .55,
-         dashArray:'3 6', interactive:false}));
+         dashArray:'3 6', interactive:false};
+    for(const parte of t.partes) capaEdicion.addLayer(L.polyline(parte, estilo));
   }
   if(ed.recorrido.length > 1)
     capaEdicion.addLayer(L.polyline(ed.recorrido, {color:'#c47f00', weight:5, dashArray:'10 7', interactive:false}));
@@ -1508,10 +1524,9 @@ function armarResumen(){
   }).filter(p => p.lat != null);
   const origs = [];
   for(const v of ed.vars){
-    const pts = v[8] && window.D_SHAPES && window.D_SHAPES[v[6]]
-      ? decodePolyline(window.D_SHAPES[v[6]]).map(p => [+p[0].toFixed(5), +p[1].toFixed(5)])
-      : v[9].map(coordParada).filter(Boolean);
-    if(pts.length > 1) origs.push(pts);
+    const t = trazaDe(v);
+    for(const parte of t.partes)
+      if(parte.length > 1) origs.push(parte.map(function(p){ return [+p[0].toFixed(5), +p[1].toFixed(5)]; }));
   }
   return {
     calles: ed.calles,

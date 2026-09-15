@@ -1219,7 +1219,7 @@ function pintarElegidos(){
   }
   const aprox = ed.vars.filter(function(v){ return !v[8]; }).length;
   $('edNotaVar').textContent = aprox
-    ? aprox + ' de los recorridos elegidos no tienen trazado oficial: su línea gris une las paradas y corta esquinas. Es solo referencia.'
+    ? aprox + ' de los recorridos elegidos no tienen trazado oficial del SIG: se dibujan punteados, uniendo sus paradas en línea recta, así que atraviesan manzanas. Son solo referencia y no afectan al desvío que trazás.'
     : '';
 }
 
@@ -1450,11 +1450,17 @@ function dibujarEdicion(){
   if(!ed) return;
   const muchos = ed.vars.length > 5;
   for(const v of ed.vars){
-    const pts = v[8] && window.D_SHAPES && window.D_SHAPES[v[6]]
-      ? decodePolyline(window.D_SHAPES[v[6]])
-      : v[9].map(coordParada).filter(Boolean);
-    if(pts.length > 1) capaEdicion.addLayer(L.polyline(pts,
-      {color:'#4a5568', weight: muchos ? 2.5 : 4, opacity: muchos ? .5 : .85, interactive:false}));
+    const oficial = !!(v[8] && window.D_SHAPES && window.D_SHAPES[v[6]]);
+    const pts = oficial ? decodePolyline(window.D_SHAPES[v[6]])
+                        : v[9].map(coordParada).filter(Boolean);
+    if(pts.length < 2) continue;
+    // Los recorridos sin trazado oficial se dibujan uniendo paradas: cortan
+    // en diagonal por dentro de las manzanas. Se marcan punteados y más tenues
+    // para que no se confundan con el recorrido real.
+    capaEdicion.addLayer(L.polyline(pts, oficial
+      ? {color:'#4a5568', weight: muchos ? 2.5 : 4, opacity: muchos ? .5 : .85, interactive:false}
+      : {color:'#8a92a6', weight: muchos ? 1.5 : 2, opacity: muchos ? .35 : .55,
+         dashArray:'3 6', interactive:false}));
   }
   if(ed.recorrido.length > 1)
     capaEdicion.addLayer(L.polyline(ed.recorrido, {color:'#c47f00', weight:5, dashArray:'10 7', interactive:false}));

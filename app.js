@@ -240,7 +240,7 @@ function asegurarCalles(){
   callesPedidas = true;
   const s = document.createElement('script');
   s.src = 'datos/calles.js';
-  s.onload = function(){ dibujarNombresCalles(); };
+  s.onload = function(){ dibujarNombresCalles(); const q = $('calle'); if(q && q.value.trim()) buscarPorCalle(q.value); };
   s.onerror = function(){
     aviso('No se encontró datos/calles.js: los nombres de calles no se van a mostrar.', 'err');
   };
@@ -457,14 +457,7 @@ function textoDesvio(d){
   L.push('Entre: ' + (d.entre || ''));
   L.push('Fecha: ' + fecha);
   L.push('Motivo: ' + (d.motivo || ''));
-  const sent = {};
-  for(const r of ((d.resumen && d.resumen.recorridos) || [])){
-    if(!sent[r.linea]) sent[r.linea] = new Set();
-    sent[r.linea].add(r.sentido);
-  }
-  let amb = false;
-  for(const k in sent) if(sent[k].size > 1) amb = true;
-  L.push('Línea: ' + ls.join(', ') + (amb ? ' (ambos sentidos)' : ''));
+  L.push('Línea: ' + textoLineas(d, ls));
   L.push('Recorrido: ' + (d.recorrido_texto || ''));
   L.push('Paradas Suspendidas: ' + (susp.length
     ? susp.map(function(p){ return p.cod + ' ' + (p.nombre || ''); }).join(' / ')
@@ -477,6 +470,30 @@ function textoDesvio(d){
   L.push('Saludos cordiales,');
   L.push('U. P. T. U.');
   return L.join('\n');
+}
+
+
+// "151, 195 (ambos sentidos)" o "151 (sentido a Portones)"
+function textoLineas(d, ls){
+  const rec = (d.resumen && d.resumen.recorridos) || [];
+  const porLinea = {};
+  for(const r of rec){
+    if(!porLinea[r.linea]) porLinea[r.linea] = [];
+    porLinea[r.linea].push(r);
+  }
+  let ambos = false, destinos = [];
+  for(const k in porLinea){
+    const s = {};
+    for(const r of porLinea[k]) s[r.sentido] = r.destino;
+    const claves = Object.keys(s);
+    if(claves.length > 1) ambos = true;
+    else destinos.push(s[claves[0]]);
+  }
+  if(!rec.length) return ls.join(', ');
+  if(ambos) return ls.join(', ') + ' (ambos sentidos)';
+  const unicos = destinos.filter(function(x,i,a2){ return x && a2.indexOf(x) === i; });
+  if(unicos.length === 1) return ls.join(', ') + ' (sentido a ' + unicos[0] + ')';
+  return ls.join(', ') + ' (un solo sentido)';
 }
 
 function nombrePDF(d){
@@ -552,14 +569,7 @@ function generarPDF(d, devolver){
   if(d.hasta) fecha += ' a ' + fmt(d.hasta);
   else if(d.desde) fecha += ' — hasta nuevo aviso';
 
-  const sentidos = {};
-  for(const r of ((d.resumen && d.resumen.recorridos) || [])){
-    if(!sentidos[r.linea]) sentidos[r.linea] = new Set();
-    sentidos[r.linea].add(r.sentido);
-  }
-  let ambos = false;
-  for(const k in sentidos) if(sentidos[k].size > 1) ambos = true;
-  const lineaTxt = ls.join(', ') + (ambos ? ' (ambos sentidos)' : '');
+  const lineaTxt = textoLineas(d, ls);
 
   const items = [
     ['Principal', d.principal || ''],
@@ -840,170 +850,198 @@ function indiceLineas(){
 
 const sinAcentos = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 
+// ---------- índice de recorridos: qué líneas circulan por cada punto ----------
+let REJILLA = null, TRAZAS = null;
+const CELDA = 0.0012;        // ~130 m
+const RADIO = 45;            // metros: media calzada más el error del trazado
+
+function indiceRecorridos(){
+  if(REJILLA) return REJILLA;
+  REJILLA = new Map();
+  TRAZAS = [];
+  for(let vi = 0; vi < (window.D_VARS || []).length; vi++){
+    const v = D_VARS[vi];
+    const pts = (v[8] && window.D_SHAPES && D_SHAPES[v[6]])
+      ? decodePolyline(D_SHAPES[v[6]])
+      : v[9].map(coordParada).filter(Boolean);
+    TRAZAS.push(pts);
+    const marcar = function(la, lo){
+      const k = Math.round(la/CELDA) + '|' + Math.round(lo/CELDA);
+      let s = REJILLA.get(k);
+      if(!s){ s = new Set(); REJILLA.set(k, s); }
+      s.add(vi);
+    };
+    for(let i = 0; i < pts.length; i++){
+      const p = pts[i], q = pts[i+1];
+      marcar(p[0], p[1]);
+      if(!q) continue;
+      // se marcan también las celdas intermedias: en los recorridos sin trazado
+      // oficial los puntos son las paradas y quedan lejos entre sí
+      const dx = (q[1]-p[1])*KX, dy = (q[0]-p[0])*KY;
+      const pasos = Math.min(40, Math.floor(Math.sqrt(dx*dx + dy*dy)/60));
+      for(let k = 1; k <= pasos; k++)
+        marcar(p[0] + (q[0]-p[0])*k/pasos, p[1] + (q[1]-p[1])*k/pasos);
+    }
+  }
+  return REJILLA;
+}
+
+// distancia de un punto al tramo entre a y b, en metros al cuadrado
+function distTramo(lat, lon, a, b){
+  const px = (lon-a[1])*KX, py = (lat-a[0])*KY;
+  const vx = (b[1]-a[1])*KX, vy = (b[0]-a[0])*KY;
+  const L2 = vx*vx + vy*vy;
+  let t = L2 ? (px*vx + py*vy)/L2 : 0;
+  t = t < 0 ? 0 : (t > 1 ? 1 : t);
+  const dx = px - vx*t, dy = py - vy*t;
+  return dx*dx + dy*dy;
+}
+
+function pasaPor(vi, lat, lon, radio){
+  const pts = TRAZAS[vi], r2 = radio*radio;
+  if(!pts || !pts.length) return false;
+  if(pts.length === 1){
+    const dx = (pts[0][1]-lon)*KX, dy = (pts[0][0]-lat)*KY;
+    return dx*dx + dy*dy <= r2;
+  }
+  for(let i = 0; i < pts.length-1; i++)
+    if(distTramo(lat, lon, pts[i], pts[i+1]) <= r2) return true;
+  return false;
+}
+
+// Variantes que realmente circulan por un punto
+function variantesCerca(lat, lon, radio){
+  const g = indiceRecorridos();
+  const r = radio || RADIO;
+  const kx = Math.round(lat/CELDA), ky = Math.round(lon/CELDA);
+  const cand = new Set();
+  for(let i = -1; i <= 1; i++) for(let j = -1; j <= 1; j++){
+    const s = g.get((kx+i) + '|' + (ky+j));
+    if(s) for(const vi of s) cand.add(vi);
+  }
+  const out = new Set();
+  for(const vi of cand) if(pasaPor(vi, lat, lon, r)) out.add(vi);
+  return out;
+}
+
+const sinAcentos2 = sinAcentos;
+
+// ---------- búsqueda por cruce o por calle ----------
+let CRUCE_ELEGIDO = null;
+
 function buscarPorCalle(txt){
   const cont = $('resCalle');
   cont.innerHTML = '';
   const crudo = sinAcentos(txt).trim();
-  if(crudo.length < 3) { resaltarParadasCalle([]); return; }
-  // "italia y comercio", "italia esq comercio", "italia / comercio" → dos calles
-  const partes = crudo.split(/\s+y\s+|\s+esq\.?\s+|\s*[\/,&]\s*/).map(s=>s.trim()).filter(s=>s.length>=3);
+  if(crudo.length < 3){ resaltarParadasCalle([]); CRUCE_ELEGIDO = null; return; }
+  if(typeof CRUCES === 'undefined'){
+    asegurarCalles();
+    cont.innerHTML = '<div class="nada">Cargando el callejero…</div>';
+    return;
+  }
+  const partes = crudo.split(/\s+y\s+|\s+esq\.?\s+|\s*[\/,&]\s*/).map(function(s){ return s.trim(); })
+    .filter(function(s){ return s.length >= 3; });
   if(!partes.length){ resaltarParadasCalle([]); return; }
-  if($('edPrincipal') && !$('edPrincipal').value.trim()) $('edPrincipal').value = txt.split(/\s+y\s+|\s+esq\.?\s+|\s*[\/,&]\s*/)[0].trim();
-  if($('edEntre') && !$('edEntre').value.trim() && partes.length > 1)
-    $('edEntre').value = txt.replace(/^[^]*?(?:\s+y\s+|\s+esq\.?\s+|\s*[\/,&]\s*)/, '').trim();
-  const idx = indiceLineas();
-  const conteo = new Map();
-  const paradasCalle = [];
-  for(const p of (window.D_PARADAS || [])){
-    if(p[6]) continue;
-    const d = sinAcentos(p[1]);
-    let coincide = true;
-    for(const t of partes){ if(d.indexOf(t) < 0){ coincide = false; break; } }
-    if(!coincide) continue;
-    paradasCalle.push(p);
-    const ls = idx.get(p[0]);
-    if(!ls) continue;
-    for(const l of ls){
-      let e = conteo.get(l);
-      if(!e){ e = {n:0, paradas:[]}; conteo.set(l, e); }
-      e.n++; e.paradas.push(p[0]);
-    }
-  }
-  let notaCruce = '';
-  // En un cruce, además de las paradas que se llaman así, se suman las de
-  // ambas calles que estén a menos de 300 m: las líneas que circulan por una
-  // de las dos suelen parar media cuadra antes o después, con otro nombre.
-  if(partes.length > 1){
-    const enA = (window.D_PARADAS || []).filter(function(p){ return !p[6] && sinAcentos(p[1]).indexOf(partes[0]) >= 0; });
-    const enB = (window.D_PARADAS || []).filter(function(p){ return !p[6] && sinAcentos(p[1]).indexOf(partes[1]) >= 0; });
-    // punto del cruce: si hay paradas con el nombre completo, su promedio;
-    // si no, el punto medio entre las dos paradas más cercanas de cada calle
-    let cx = null, cy = null;
-    if(paradasCalle.length){
-      cx = paradasCalle.reduce(function(s,p){ return s + p[3]; }, 0) / paradasCalle.length;
-      cy = paradasCalle.reduce(function(s,p){ return s + p[2]; }, 0) / paradasCalle.length;
-    }else if(enA.length && enB.length){
-      let mejor = Infinity;
-      for(const p of enA) for(const q of enB){
-        const dx = (p[3]-q[3])*KX, dy = (p[2]-q[2])*KY;
-        const d = dx*dx + dy*dy;
-        if(d < mejor){ mejor = d; cx = (p[3]+q[3])/2; cy = (p[2]+q[2])/2; }
-      }
-    }
-    if(cx !== null){
-      const yaEsta = {};
-      for(const p of paradasCalle) yaEsta[p[0]] = true;
-      let sumadas = 0;
-      for(const p of enA.concat(enB)){
-        if(yaEsta[p[0]]) continue;
-        const dx = (p[3]-cx)*KX, dy = (p[2]-cy)*KY;
-        if(dx*dx + dy*dy > 300*300) continue;
-        yaEsta[p[0]] = true;
-        paradasCalle.push(p);
-        sumadas++;
-        const ls = idx.get(p[0]);
-        if(!ls) continue;
-        for(const l of ls){
-          let e = conteo.get(l);
-          if(!e){ e = {n:0, paradas:[]}; conteo.set(l, e); }
-          e.n++; e.paradas.push(p[0]);
-        }
-      }
-      if(sumadas) notaCruce = 'Incluye las paradas de ambas calles a menos de 300 m del cruce. ';
-    }
-  }
-  if(!conteo.size && partes.length > 1){
-    const enA = (window.D_PARADAS || []).filter(function(p){ return !p[6] && sinAcentos(p[1]).indexOf(partes[0]) >= 0; });
-    const enB = (window.D_PARADAS || []).filter(function(p){ return !p[6] && sinAcentos(p[1]).indexOf(partes[1]) >= 0; });
-    if(enA.length && enB.length){
-      const cerca = enA.filter(function(p){
-        for(const q of enB){
-          const dx = (p[3]-q[3])*KX, dy = (p[2]-q[2])*KY;
-          if(dx*dx + dy*dy <= 500*500) return true;
-        }
-        return false;
-      });
-      for(const p of cerca){
-        paradasCalle.push(p);
-        const ls = idx.get(p[0]);
-        if(!ls) continue;
-        for(const l of ls){
-          let e = conteo.get(l);
-          if(!e){ e = {n:0, paradas:[]}; conteo.set(l, e); }
-          e.n++; e.paradas.push(p[0]);
-        }
-      }
-      if(conteo.size) notaCruce = 'No hay una parada con ese nombre exacto: se muestran las paradas cercanas al cruce (500 m). ';
-    }
-  }
-  if(!conteo.size){
-    cont.innerHTML = '<div class="nada">' +
-      (partes.length > 1 ? 'Sin paradas en ese cruce ni cerca. Probá con una sola calle.' : 'Sin líneas para esa calle') +
-      '</div>';
+
+  // nombres de calle que coinciden con cada término
+  const coincide = partes.map(function(t){
+    const s = new Set();
+    for(let i = 0; i < CALLES_N.length; i++) if(sinAcentos(CALLES_N[i]).indexOf(t) >= 0) s.add(i);
+    return s;
+  });
+  if(coincide.some(function(s){ return !s.size; })){
+    cont.innerHTML = '<div class="nada">No hay ninguna calle con ese nombre</div>';
     resaltarParadasCalle([]);
     return;
   }
 
-  // Hay calles homónimas en otras zonas (Florida, Colonia, Rivera...). Las paradas
-  // se encadenan mientras estén a menos de 5 km entre sí: así una avenida larga
-  // queda entera, pero una calle del interior con el mismo nombre queda aparte.
-  let descartadas = 0;
-  if(paradasCalle.length > 2){
-    const n = paradasCalle.length;
-    const grupo = new Array(n).fill(-1);
-    let cuantos = 0;
-    for(let i = 0; i < n; i++){
-      if(grupo[i] >= 0) continue;
-      const g = cuantos++;
-      const cola = [i];
-      grupo[i] = g;
-      while(cola.length){
-        const k = cola.pop();
-        for(let j = 0; j < n; j++){
-          if(grupo[j] >= 0) continue;
-          const dx = (paradasCalle[k][3]-paradasCalle[j][3])*KX;
-          const dy = (paradasCalle[k][2]-paradasCalle[j][2])*KY;
-          if(dx*dx + dy*dy <= 5000*5000){ grupo[j] = g; cola.push(j); }
-        }
+  let puntos = [];      // dónde buscar líneas
+  let etiqueta = '';
+  let otros = 0;
+
+  if(partes.length > 1){
+    // cruces donde estén todas las calles nombradas
+    const cand = [];
+    for(const c of CRUCES){
+      const ids = c.slice(2);
+      let ok = true;
+      for(const s of coincide){
+        let hay = false;
+        for(const id of ids) if(s.has(id)){ hay = true; break; }
+        if(!hay){ ok = false; break; }
       }
+      if(ok) cand.push(c);
     }
-    if(cuantos > 1){
-      // se queda el grupo por el que pasan más líneas, no el que tiene más paradas
-      const info = [];
-      for(let g = 0; g < cuantos; g++) info.push({g:g, paradas:[], lineas:new Set()});
-      for(let i = 0; i < n; i++){
-        const inf = info[grupo[i]];
-        inf.paradas.push(paradasCalle[i]);
-        for(const l of (idx.get(paradasCalle[i][0]) || [])) inf.lineas.add(l);
-      }
-      info.sort(function(x, y){ return (y.lineas.size - x.lineas.size) || (y.paradas.length - x.paradas.length); });
-      const principal = info[0].paradas;
-      descartadas = n - principal.length;
-      conteo.clear();
-      paradasCalle.length = 0;
-      for(const p of principal){
-        paradasCalle.push(p);
-        const ls = idx.get(p[0]);
-        if(!ls) continue;
-        for(const l of ls){
-          let e = conteo.get(l);
-          if(!e){ e = {n:0, paradas:[]}; conteo.set(l, e); }
-          e.n++; e.paradas.push(p[0]);
-        }
-      }
-      if(descartadas) notaCruce += 'Hay ' + descartadas + ' parada' + (descartadas===1?'':'s') +
-        ' con ese nombre en otra zona; se muestran las de acá. ';
+    if(!cand.length){
+      cont.innerHTML = '<div class="nada">Esas calles no se cruzan. Probá con una sola calle.</div>';
+      resaltarParadasCalle([]);
+      return;
     }
+    // agrupar los nodos del mismo cruce y quedarse con el de más líneas
+    const grupos = [];
+    for(const c of cand){
+      let puesto = false;
+      for(const g of grupos){
+        const dx = (c[1]-g.lon)*KX, dy = (c[0]-g.lat)*KY;
+        if(dx*dx + dy*dy <= 250*250){ g.n++; puesto = true; break; }
+      }
+      if(!puesto) grupos.push({lat:c[0], lon:c[1], n:1});
+    }
+    for(const g of grupos){
+      const vs = variantesCerca(g.lat, g.lon);
+      const ls = new Set();
+      for(const vi of vs) ls.add(D_VARS[vi][0]);
+      g.lineas = ls.size;
+      g.enMontevideo = paradaMasCerca(g.lat, g.lon, 900);
+    }
+    grupos.sort(function(x, y){
+      return ((y.enMontevideo?1:0) - (x.enMontevideo?1:0)) || (y.lineas - x.lineas);
+    });
+    const elegido = grupos[0];
+    CRUCE_ELEGIDO = elegido;
+    puntos = [[elegido.lat, elegido.lon]];
+    otros = grupos.length - 1;
+    etiqueta = 'cruce';
+  }else{
+    // calle entera: todos los puntos de su traza
+    const ids = coincide[0];
+    for(const c of CALLES) if(ids.has(c[0])) puntos.push([c[1], c[2]]);
+    CRUCE_ELEGIDO = null;
+    etiqueta = 'calle';
+    // si la calle tiene tramos en zonas muy separadas, se queda el grupo mayor
+    puntos = grupoPrincipal(puntos);
   }
 
-  const orden = Array.from(conteo.entries()).sort(function(a,b){
-    if(b[1].n !== a[1].n) return b[1].n - a[1].n;
-    const na = parseInt(a[0],10), nb = parseInt(b[0],10);
+  // líneas que circulan por esos puntos
+  const conteo = new Map();
+  for(const pt of puntos){
+    for(const vi of variantesCerca(pt[0], pt[1])){
+      const v = D_VARS[vi];
+      let e = conteo.get(v[0]);
+      if(!e){ e = {n:0, vars:new Set()}; conteo.set(v[0], e); }
+      e.n++; e.vars.add(vi);
+    }
+  }
+  // En una calle entera, las líneas que solo la cruzan tocan un punto suelto.
+  // Se piden al menos dos puntos de la traza para considerar que circulan por ella.
+  if(!CRUCE_ELEGIDO && puntos.length >= 4){
+    const filtrado = new Map();
+    conteo.forEach(function(e, l){ if(e.n >= 2) filtrado.set(l, e); });
+    if(filtrado.size){ conteo.clear(); filtrado.forEach(function(e, l){ conteo.set(l, e); }); }
+  }
+  if(!conteo.size){
+    cont.innerHTML = '<div class="nada">No circula ninguna línea por ahí</div>';
+    resaltarParadasCalle([]);
+    return;
+  }
+
+  const orden = Array.from(conteo.entries()).sort(function(a2, b2){
+    if(b2[1].n !== a2[1].n) return b2[1].n - a2[1].n;
+    const na = parseInt(a2[0],10), nb = parseInt(b2[0],10);
     if(Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
-    return a[0] < b[0] ? -1 : 1;
+    return a2[0] < b2[0] ? -1 : 1;
   });
-  const cab = document.createElement('div');
-  cab.className = 'nada';
+
   if(orden.length > 1){
     const acc = document.createElement('div');
     acc.className = 'accCalle';
@@ -1011,42 +1049,82 @@ function buscarPorCalle(txt){
     bTodas.className = 'mini';
     bTodas.textContent = 'Todas se desvían (' + orden.length + ')';
     bTodas.onclick = function(){
-      for(const par of orden) if(!lineaElegida(par[0])) alternarLinea(par[0], par[1].paradas);
+      for(const par of orden) if(!lineaElegida(par[0])) alternarLinea(par[0], par[1].vars);
       buscarPorCalle($('calle').value);
     };
     acc.appendChild(bTodas);
-    const elegidasAca = orden.filter(function(par){ return lineaElegida(par[0]); }).length;
-    if(elegidasAca){
+    if(orden.some(function(par){ return lineaElegida(par[0]); })){
       const bNada = document.createElement('button');
       bNada.className = 'mini';
       bNada.textContent = 'Quitar todas';
       bNada.onclick = function(){
-        for(const par of orden) if(lineaElegida(par[0])) alternarLinea(par[0], par[1].paradas);
+        for(const par of orden) if(lineaElegida(par[0])) alternarLinea(par[0], par[1].vars);
         buscarPorCalle($('calle').value);
       };
       acc.appendChild(bNada);
     }
     cont.appendChild(acc);
   }
-  cab.textContent = notaCruce + orden.length + (orden.length === 1 ? ' línea' : ' líneas') + ' · ' +
-    paradasCalle.length + (paradasCalle.length === 1 ? ' parada' : ' paradas') +
-    (partes.length > 1 ? ' en ese cruce' : ' en esa calle') + ' · tocá las que se desvían';
+
+  const cab = document.createElement('div');
+  cab.className = 'nada';
+  cab.textContent = orden.length + (orden.length === 1 ? ' línea circula' : ' líneas circulan') +
+    ' por ' + (etiqueta === 'cruce' ? 'ese cruce' : 'esa calle') +
+    (otros ? ' · hay ' + otros + ' cruce' + (otros===1?'':'s') + ' más con esos nombres' : '') +
+    ' · tocá las que se desvían';
   cont.appendChild(cab);
-  for(const par of orden.slice(0, 60)){
+
+  for(const par of orden.slice(0, 80)){
     const linea = par[0], info = par[1];
     const b = document.createElement('button');
     b.className = 'lchip' + (lineaElegida(linea) ? ' on' : '');
-    b.innerHTML = '<b></b><span></span>';
+    b.innerHTML = '<b></b>';
     b.querySelector('b').textContent = linea;
-    b.querySelector('span').textContent = info.n;
-    b.title = info.n + ' parada' + (info.n===1?'':'s') + ' de la línea ' + linea + ' ahí';
-    b.onclick = (function(l, paradas){ return function(){
-      alternarLinea(l, paradas);
+    b.title = 'Línea ' + linea + ' — tocar para sumarla al desvío';
+    b.onclick = (function(l, vars){ return function(){
+      alternarLinea(l, vars);
       buscarPorCalle($('calle').value);
-    }; })(linea, info.paradas);
+    }; })(linea, info.vars);
     cont.appendChild(b);
   }
-  resaltarParadasCalle(paradasCalle);
+
+  marcarPuntos(puntos);
+}
+
+// agrupa puntos encadenando los que están a menos de 5 km y devuelve el grupo mayor
+function grupoPrincipal(pts){
+  if(pts.length < 3) return pts;
+  const n = pts.length, g = new Array(n).fill(-1);
+  let c = 0;
+  for(let i = 0; i < n; i++){
+    if(g[i] >= 0) continue;
+    const gi = c++;
+    g[i] = gi;
+    const cola = [i];
+    while(cola.length){
+      const k = cola.pop();
+      for(let j = 0; j < n; j++){
+        if(g[j] >= 0) continue;
+        const dx = (pts[k][1]-pts[j][1])*KX, dy = (pts[k][0]-pts[j][0])*KY;
+        if(dx*dx + dy*dy <= 5000*5000){ g[j] = gi; cola.push(j); }
+      }
+    }
+  }
+  if(c === 1) return pts;
+  const cuenta = new Array(c).fill(0);
+  for(const x of g) cuenta[x]++;
+  let mejor = 0;
+  for(let i = 1; i < c; i++) if(cuenta[i] > cuenta[mejor]) mejor = i;
+  return pts.filter(function(p, i){ return g[i] === mejor; });
+}
+
+function paradaMasCerca(lat, lon, radio){
+  for(const p of (window.D_PARADAS || [])){
+    if(!p[5]) continue;                       // solo las de la capital
+    const dx = (p[3]-lon)*KX, dy = (p[2]-lat)*KY;
+    if(dx*dx + dy*dy <= radio*radio) return true;
+  }
+  return false;
 }
 
 function lineaElegida(linea){
@@ -1054,25 +1132,27 @@ function lineaElegida(linea){
 }
 
 // Al tocar una línea se suman sus recorridos que realmente pasan por esas paradas
-function alternarLinea(linea, paradas){
+function alternarLinea(linea, vars){
   if(!ed) return;
   if(lineaElegida(linea)){
     ed.vars = ed.vars.filter(function(v){ return v[0] !== linea; });
     pintarElegidos(); dibujarEdicion();
     return;
   }
-  const set = new Set(paradas || []);
-  let cand = (window.D_VARS || []).filter(function(v){
-    if(v[0] !== linea) return false;
-    if(!set.size) return v[5] === 1;
-    for(const c of v[9]) if(set.has(c)) return true;
-    return false;
-  });
-  const maximas = cand.filter(function(v){ return v[5] === 1; });
-  if(maximas.length) cand = maximas;
+  let cand = [];
+  if(vars && vars.size){
+    for(const vi of vars) if(D_VARS[vi][0] === linea) cand.push(D_VARS[vi]);
+  }
+  if(!cand.length) cand = (window.D_VARS || []).filter(function(v){ return v[0] === linea && v[5] === 1; });
+  // se prefiere el recorrido máximo de cada sentido
   const porSentido = {};
-  for(const v of cand) if(!porSentido[v[4]]) porSentido[v[4]] = v;
-  const nuevos = Object.keys(porSentido).map(function(k){ return porSentido[k]; });
+  for(const v of cand){
+    const s = v[4] || 'A';
+    if(!porSentido[s] || (v[5] && !porSentido[s][5])) porSentido[s] = v;
+  }
+  let nuevos = Object.keys(porSentido).map(function(k){ return porSentido[k]; });
+  if(ed.sentidoFiltro === 'A' || ed.sentidoFiltro === 'B')
+    nuevos = nuevos.filter(function(v){ return (v[4] || 'A') === ed.sentidoFiltro; });
   if(!nuevos.length){ aviso('La línea ' + linea + ' no tiene recorridos por ahí', 'err'); return; }
   for(const v of nuevos) ed.vars.push(v);
   pintarElegidos(); dibujarEdicion();
@@ -1085,9 +1165,34 @@ function quitarVariante(cod){
   buscarPorCalle($('calle').value);
 }
 
+function cambiarSentido(s){
+  if(!ed) return;
+  ed.sentidoFiltro = s;
+  if(s === 'A' || s === 'B')
+    ed.vars = ed.vars.filter(function(v){ return (v[4] || 'A') === s; });
+  pintarElegidos(); dibujarEdicion();
+  if($('calle').value.trim()) buscarPorCalle($('calle').value);
+}
+
+function pintarSentido(){
+  const cont = $('sentidoSel');
+  if(!cont || !ed) return;
+  cont.innerHTML = '';
+  const ops = [['ambos','Ambos sentidos'], ['A','Solo ida'], ['B','Solo vuelta']];
+  for(const o of ops){
+    const b = document.createElement('button');
+    b.className = 'chip';
+    b.textContent = o[1];
+    b.setAttribute('aria-pressed', String(ed.sentidoFiltro === o[0]));
+    b.onclick = (function(s){ return function(){ cambiarSentido(s); }; })(o[0]);
+    cont.appendChild(b);
+  }
+}
+
 function pintarElegidos(){
   const cont = $('elegidos');
   if(!cont) return;
+  pintarSentido();
   cont.innerHTML = '';
   if(!ed || !ed.vars.length){
     cont.innerHTML = '<div class="nada">Todavía no elegiste ningún recorrido.</div>';
@@ -1119,26 +1224,36 @@ function pintarElegidos(){
 }
 
 let capaCalle = null;
-function resaltarParadasCalle(paradas){
+
+function marcarPuntos(pts){
   if(capaCalle){ capaCalle.remove(); capaCalle = null; }
-  if(!paradas || !paradas.length) return;
+  if(!pts || !pts.length) return;
   capaCalle = L.layerGroup();
-  for(const p of paradas){
-    const m = L.circleMarker([p[2], p[3]], {radius:5, color:'#7B2D8E', weight:2,
-      fillColor:'#E3CCEC', fillOpacity:.9, renderer});
-    m.bindTooltip(esc(p[0] + ' · ' + p[1]), {direction:'top'});
-    capaCalle.addLayer(m);
+  if(CRUCE_ELEGIDO){
+    // un cruce: se marca el punto exacto
+    capaCalle.addLayer(L.circleMarker([CRUCE_ELEGIDO.lat, CRUCE_ELEGIDO.lon],
+      {radius:11, color:'#7B2D8E', weight:3, fillColor:'#E3CCEC', fillOpacity:.55, renderer}));
+    capaCalle.addTo(mapa);
+    mapa.setView([CRUCE_ELEGIDO.lat, CRUCE_ELEGIDO.lon], Math.max(mapa.getZoom(), 16));
+    return;
+  }
+  for(const p of pts){
+    capaCalle.addLayer(L.circleMarker(p, {radius:4, color:'#7B2D8E', weight:2,
+      fillColor:'#E3CCEC', fillOpacity:.9, renderer, interactive:false}));
   }
   capaCalle.addTo(mapa);
-  mapa.fitBounds(L.latLngBounds(paradas.map(function(p){ return [p[2], p[3]]; })), {padding:[40,40]});
+  mapa.fitBounds(L.latLngBounds(pts), {padding:[40,40]});
 }
+
+// se mantiene el nombre anterior por compatibilidad
+function resaltarParadasCalle(pts){ marcarPuntos(pts); }
 
 /* ================= EDITOR ================= */
 async function nuevoDesvio(){
   try{ await cargarBase(); }
   catch(err){ aviso(err.message, 'err'); return; }
   ed = {id:null, linea:'', variantes:[], sentido:null, titulo:'', motivo:'', observaciones:'',
-        principal:'', entre:'', recorridoTexto:'', calles:[],
+        principal:'', entre:'', recorridoTexto:'', calles:[], sentidoFiltro:'ambos',
         estado:'borrador', desde:null, hasta:null, recorrido:[], vertices:[],
         suspendidas:[], provisorias:[], vars:[]};
   abrirEditor();
@@ -1154,6 +1269,7 @@ async function editarDesvio(d){
         titulo:d.titulo, motivo:d.motivo || '', observaciones:d.observaciones || '',
         principal:d.principal || '', entre:d.entre || '',
         recorridoTexto:d.recorrido_texto || '', calles:((d.resumen && d.resumen.calles) || []).slice(),
+        sentidoFiltro:(d.sentido === 'A' ? 'A' : (d.sentido === 'B' ? 'B' : 'ambos')),
         estado:d.estado, desde:d.desde, hasta:d.hasta,
         recorrido:(d.recorrido || []).slice(),
         vertices:((d.resumen && d.resumen.vertices) || (d.recorrido || [])).slice(),
@@ -1410,7 +1526,10 @@ async function guardar(nuevoEstado){
   const lineasSel = ed.vars.map(function(v){ return v[0]; }).filter(function(x,i,a){ return a.indexOf(x)===i; });
   ed.linea = lineasSel.length ? lineasSel.join(', ') : $('edLinea').value.trim();
   ed.variantes = ed.vars.map(function(v){ return v[6]; });
-  ed.sentido = ed.vars.length === 1 ? ed.vars[0][4] : null;
+  const sents = ed.vars.map(function(v){ return v[4] || 'A'; })
+    .filter(function(x,i,arr){ return arr.indexOf(x) === i; });
+  ed.sentido = (ed.sentidoFiltro === 'A' || ed.sentidoFiltro === 'B') ? ed.sentidoFiltro
+             : (sents.length === 1 ? sents[0] : null);
   ed.titulo = $('edTitulo').value.trim();
   ed.motivo = $('edMotivo').value.trim();
   ed.recorridoTexto = $('edRecorrido').value.trim();
@@ -1495,7 +1614,7 @@ async function iniciar(){
   $('btnActualizar').onclick = cargarDesvios;
   $('btnNuevo').onclick = nuevoDesvio;
   $('btnCerrarEditor').onclick = cerrarEditor;
-  $('calle').addEventListener('input', e => buscarPorCalle(e.target.value));
+  $('calle').addEventListener('input', e => { asegurarCalles(); buscarPorCalle(e.target.value); });
   $('edLinea').addEventListener('input', e => buscarVariantes(e.target.value));
   $('edVariante').addEventListener('change', e => elegirVariante(e.target.value));
   $('h_recorrido').onclick = ()=> usarHerramienta('recorrido');

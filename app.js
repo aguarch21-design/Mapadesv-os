@@ -1497,23 +1497,39 @@ function usarHerramienta(h){
 
 function paradasDeLaSeleccion(){
   const out = [];
-  const vistas = new Set();
+  const vistas = new Map();   // código de parada -> Set de sentidos
   if(!ed) return out;
-  for(const v of ed.vars) for(const c of v[9]) if(!vistas.has(c)){ vistas.add(c); out.push(c); }
+  for(const v of ed.vars){
+    const s = v[4] || 'A';
+    for(const c of v[9]){
+      let ss = vistas.get(c);
+      if(!ss){ ss = new Set(); vistas.set(c, ss); out.push(c); }
+      ss.add(s);
+    }
+  }
+  out.sentidos = vistas;
   return out;
 }
 
 function dibujarParadasLinea(){
   capaParadas.clearLayers();
   if(!ed || !ed.vars.length) return;
-  for(const c of paradasDeLaSeleccion()){
+  const paradas = paradasDeLaSeleccion();
+  const dosSentidos = sentidosConTrazado().length > 1 ||
+    (new Set(ed.vars.map(function(v){ return v[4] || 'A'; })).size > 1);
+  for(const c of paradas){
     const xy = coordParada(c);
     if(!xy) continue;
     const susp = ed.suspendidas.indexOf(c) >= 0;
+    const ss = paradas.sentidos.get(c);
+    const soloB = dosSentidos && ss && ss.size === 1 && ss.has('B');
     const m = L.circleMarker(xy, susp
       ? {radius:7, color:'#B3403C', weight:2, fillColor:'#E8B4B2', fillOpacity:1, renderer}
-      : {radius:5, color:'#003580', weight:1.5, fillColor:'#fff', fillOpacity:1, renderer});
-    m.bindTooltip(esc(c + ' · ' + nombreParada(c) + (susp ? ' (suspendida)' : '')), {direction:'top'});
+      : {radius:5, color: soloB ? '#1E6FA8' : '#003580', weight:1.5,
+         fillColor: soloB ? '#DCEAF5' : '#fff', fillOpacity:1, renderer});
+    const etqSent = dosSentidos ? (ss.size > 1 ? ' · ambos sentidos' :
+      (ss.has('B') ? ' · vuelta' : ' · ida')) : '';
+    m.bindTooltip(esc(c + ' · ' + nombreParada(c) + etqSent + (susp ? ' (suspendida)' : '')), {direction:'top'});
     capaParadas.addLayer(m);
   }
 }
@@ -1545,7 +1561,7 @@ function clicMapa(e){
   }else if(herramienta === 'suspender'){
     if(!ed.vars.length){ aviso('Elegí primero al menos un recorrido', 'err'); return; }
     const pt = mapa.latLngToContainerPoint(e.latlng);
-    let best = null, bestD = 16;
+    let best = null, bestD = 22;
     for(const c of paradasDeLaSeleccion()){
       const xy = coordParada(c); if(!xy) continue;
       const q = mapa.latLngToContainerPoint(xy);

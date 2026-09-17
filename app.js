@@ -1331,15 +1331,28 @@ function pintarElegidos(){
     ed.vars.length + (ed.vars.length === 1 ? ' recorrido' : ' recorridos') +
     ' · mismo trazado y mismas paradas para todas';
   cont.appendChild(res);
-  for(const v of ed.vars){
-    const el = document.createElement('div');
-    el.className = 'eleg';
-    el.innerHTML = '<b></b><span></span><button title="Quitar">\u00d7</button>';
-    el.querySelector('b').textContent = v[0];
-    el.querySelector('span').textContent = 'línea ' + v[0] + ' · ' + (v[4] === 'A' ? 'ida' : 'vuelta') +
-      (v[5] ? '' : ' · corto') + ' · ' + v[3];
-    el.querySelector('button').onclick = (function(c){ return function(){ quitarVariante(c); }; })(v[6]);
-    cont.appendChild(el);
+  // agrupadas por sentido, con el destino de cada línea en su propio renglón
+  const grupos = {A: [], B: []};
+  for(const v of ed.vars) (grupos[v[4] === 'B' ? 'B' : 'A']).push(v);
+  const rotulo = {A: 'Ida', B: 'Vuelta'};
+  const hayAmbos = grupos.A.length && grupos.B.length;
+  for(const s of ['A', 'B']){
+    if(!grupos[s].length) continue;
+    if(hayAmbos){
+      const tit = document.createElement('div');
+      tit.className = 'tituloSentido';
+      tit.textContent = rotulo[s];
+      cont.appendChild(tit);
+    }
+    for(const v of grupos[s]){
+      const el = document.createElement('div');
+      el.className = 'eleg';
+      el.innerHTML = '<b></b><span></span><button title="Quitar">\u00d7</button>';
+      el.querySelector('b').textContent = v[0];
+      el.querySelector('span').textContent = v[3] + (v[5] ? '' : ' · corto');
+      el.querySelector('button').onclick = (function(c){ return function(){ quitarVariante(c); }; })(v[6]);
+      cont.appendChild(el);
+    }
   }
   const aprox = ed.vars.filter(function(v){ return !v[8]; }).length;
   $('edNotaVar').textContent = aprox

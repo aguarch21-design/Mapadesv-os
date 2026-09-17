@@ -52,32 +52,36 @@ async function calleDelPunto(p){
 
 // Escribe el recorrido con las calles del trazado.
 // No pisa lo que la persona ya haya editado a mano.
-function proponerRecorrido(){
-  const campo = $('edRecorrido');
-  if(!campo || !ed) return;
-  if(campo.dataset.tocado === '1') return;
-  const calles = ed.calles.filter(function(c){ return c && c.length > 2; });
-  if(!calles.length) return;
-  campo.value = calles.join(', ') + '.';
-  ed.recorridoTexto = campo.value;
+function proponerRecorrido(sentido){
+  if(!ed) return;
+  const s = sentido || ed.dibujando;
+  const t = ed.traz[s];
+  const calles = t.calles.filter(function(c){ return c && c.length > 2; });
+  if(calles.length && !t.tocado) t.texto = calles.join(', ') + '.';
+  if(s === ed.dibujando){
+    const campo = $('edRecorrido');
+    if(campo && !t.tocado) campo.value = t.texto;
+  }
 }
 
 // Rehace el recorrido consultando la calle de cada punto marcado.
 async function escribirCalles(){
-  if(!ed || !ed.vertices.length){ aviso('Marcá primero el recorrido provisorio', 'err'); return; }
+  if(!ed || !trazActual().v.length){ aviso('Marcá primero el recorrido provisorio', 'err'); return; }
   const btn = $('btnCalles');
   btn.disabled = true; btn.textContent = 'Consultando…';
   const calles = [];
-  for(const p of ed.vertices){
+  for(const p of trazActual().v){
     const n = await calleDelPunto(p);
     if(n && calles[calles.length - 1] !== n) calles.push(n);
   }
   if(calles.length){
-    ed.calles = calles;
+    const t = trazActual();
+    t.calles = calles;
+    t.texto = calles.join(', ') + '.';
+    t.tocado = true;
     const campo = $('edRecorrido');
-    campo.value = calles.join(', ') + '.';
+    campo.value = t.texto;
     campo.dataset.tocado = '1';
-    ed.recorridoTexto = campo.value;
     aviso('Recorrido escrito con ' + calles.length + ' calles. Revisalo antes de publicar.', 'ok');
   }else{
     aviso('No se pudieron obtener los nombres de las calles', 'err');
@@ -87,7 +91,7 @@ async function escribirCalles(){
 
 
 function recorridoPlano(){
-  return (ed && ed.vertices) ? ed.vertices.slice() : [];
+  return ed ? trazActual().v.slice() : [];
 }
 
 const $ = id => document.getElementById(id);
@@ -398,9 +402,15 @@ function dibujarDesvios(){
     for(const orig of origs)
       if(orig.length > 1)
         capaDesvios.addLayer(L.polyline(orig, {color:'#4a5568', weight:4, opacity:.85*op, interactive:false}));
-    if((d.recorrido || []).length > 1)
-      capaDesvios.addLayer(L.polyline(d.recorrido, {color:'#c47f00', weight:5, opacity:op,
-        dashArray:'10 7', interactive:false}));
+    // el recorrido puede ser una lista de puntos (un sentido) o una lista de
+    // recorridos (uno por sentido, cuando las calles no coinciden)
+    const rec = d.recorrido || [];
+    const partesR = (rec.length && Array.isArray(rec[0]) && Array.isArray(rec[0][0])) ? rec : (rec.length ? [rec] : []);
+    for(let k = 0; k < partesR.length; k++){
+      if(partesR[k].length < 2) continue;
+      capaDesvios.addLayer(L.polyline(partesR[k], {color: k === 0 ? '#c47f00' : '#1E6FA8',
+        weight:5, opacity:op, dashArray:'10 7', interactive:false}));
+    }
     for(const p of (d.resumen && d.resumen.paradas_suspendidas) || []){
       const m = L.circleMarker([p.lat, p.lon], {radius:6, color:'#B3403C', weight:2,
         fillColor:'#E8B4B2', fillOpacity:op, renderer});
@@ -458,7 +468,7 @@ function textoDesvio(d){
   L.push('Fecha: ' + fecha);
   L.push('Motivo: ' + (d.motivo || ''));
   L.push('Línea: ' + textoLineas(d, ls));
-  L.push('Recorrido: ' + (d.recorrido_texto || ''));
+  L.push('Recorrido: ' + textoRecorrido(d));
   L.push('Paradas Suspendidas: ' + (susp.length
     ? susp.map(function(p){ return p.cod + ' ' + (p.nombre || ''); }).join(' / ')
     : 'No se suspenden paradas.'));
@@ -474,6 +484,15 @@ function textoDesvio(d){
 
 
 // "151, 195 (ambos sentidos)" o "151 (sentido a Portones)"
+// El recorrido puede venir con un trazado por sentido
+function textoRecorrido(d){
+  const t = (d.resumen && d.resumen.traz) || null;
+  if(t && t.A && t.B && t.A.texto && t.B.texto &&
+     t.A.v && t.B.v && t.A.v.length > 1 && t.B.v.length > 1)
+    return 'Ida: ' + t.A.texto + '   Vuelta: ' + t.B.texto;
+  return d.recorrido_texto || '';
+}
+
 function textoLineas(d, ls){
   const rec = (d.resumen && d.resumen.recorridos) || [];
   const porLinea = {};
@@ -577,7 +596,7 @@ function generarPDF(d, devolver){
     ['Fecha', fecha],
     ['Motivo', d.motivo || ''],
     ['Línea', lineaTxt],
-    ['Recorrido', d.recorrido_texto || ''],
+    ['Recorrido', textoRecorrido(d)],
     ['Paradas Suspendidas', susp.length
       ? susp.map(function(p){ return p.cod + ' ' + (p.nombre || ''); }).join(' / ')
       : 'No se suspenden paradas.'],
@@ -849,6 +868,41 @@ function indiceLineas(){
 }
 
 const sinAcentos = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+// Un desvío puede tener un recorrido distinto por sentido: con calles de
+// sentido único, la ida y la vuelta van por calles diferentes.
+function trazVacio(){ return {A:{v:[], calles:[], texto:''}, B:{v:[], calles:[], texto:''}}; }
+
+function trazDesde(d){
+  const t = trazVacio();
+  const r = (d.resumen && d.resumen.traz) || null;
+  if(r){
+    for(const s of ['A','B']) if(r[s]){
+      t[s].v = (r[s].v || []).slice();
+      t[s].calles = (r[s].calles || []).slice();
+      t[s].texto = r[s].texto || '';
+    }
+    return t;
+  }
+  // desvíos guardados antes de esta función: un solo trazado
+  const s = (d.sentido === 'B') ? 'B' : 'A';
+  t[s].v = ((d.resumen && d.resumen.vertices) || d.recorrido || []).slice();
+  t[s].calles = ((d.resumen && d.resumen.calles) || []).slice();
+  t[s].texto = d.recorrido_texto || '';
+  return t;
+}
+
+// sentidos que tienen trazado propio
+function sentidosConTrazado(){
+  const out = [];
+  if(ed){ for(const s of ['A','B']) if(ed.traz[s].v.length > 1) out.push(s); }
+  return out;
+}
+
+function nombreSentido(s){ return s === 'B' ? 'vuelta' : 'ida'; }
+
+// el sentido que se está dibujando ahora
+function trazActual(){ return ed.traz[ed.dibujando] || ed.traz.A; }
 
 // Devuelve la traza de una variante como una o varias polilíneas.
 // En los recorridos sin trazado oficial los puntos son las paradas: si dos
@@ -1186,12 +1240,61 @@ function quitarVariante(cod){
   buscarPorCalle($('calle').value);
 }
 
+// Barra para elegir qué sentido se está trazando
+function pintarDibujando(){
+  const cont = $('dibujandoSel');
+  if(!cont || !ed) return;
+  const dos = (ed.sentidoFiltro === 'ambos');
+  cont.style.display = dos ? 'flex' : 'none';
+  cont.innerHTML = '';
+  if(dos){
+    for(const s of ['A','B']){
+      const b = document.createElement('button');
+      b.className = 'chip';
+      const n = ed.traz[s].v.length;
+      b.textContent = (s === 'A' ? 'Ida' : 'Vuelta') + (n ? ' (' + n + ')' : '');
+      b.setAttribute('aria-pressed', String(ed.dibujando === s));
+      b.onclick = (function(x){ return function(){ cambiarDibujando(x); }; })(s);
+      cont.appendChild(b);
+    }
+  }else if(ed.sentidoFiltro === 'A' || ed.sentidoFiltro === 'B'){
+    ed.dibujando = ed.sentidoFiltro;
+  }
+  const t = trazActual();
+  const campo = $('edRecorrido');
+  if(campo){
+    campo.value = t.texto || '';
+    campo.dataset.tocado = t.tocado ? '1' : '0';
+    campo.placeholder = 'Calles del recorrido de ' + nombreSentido(ed.dibujando);
+  }
+  const ay = $('edAyudaSentido');
+  if(ay) ay.textContent = dos
+    ? 'Estás trazando el recorrido de ' + nombreSentido(ed.dibujando) +
+      '. Cambiá de sentido para trazar el otro: con calles de sentido único no coinciden.'
+    : '';
+}
+
+function cambiarDibujando(s){
+  if(!ed) return;
+  // se guarda lo escrito en el sentido que se deja
+  const campo = $('edRecorrido');
+  if(campo){
+    trazActual().texto = campo.value.trim();
+    trazActual().tocado = campo.dataset.tocado === '1';
+  }
+  ed.dibujando = s;
+  pintarDibujando();
+  dibujarEdicion();
+}
+
 function cambiarSentido(s){
   if(!ed) return;
   ed.sentidoFiltro = s;
-  if(s === 'A' || s === 'B')
+  if(s === 'A' || s === 'B'){
     ed.vars = ed.vars.filter(function(v){ return (v[4] || 'A') === s; });
-  pintarElegidos(); dibujarEdicion();
+    ed.dibujando = s;
+  }
+  pintarElegidos(); pintarDibujando(); dibujarEdicion();
   if($('calle').value.trim()) buscarPorCalle($('calle').value);
 }
 
@@ -1274,8 +1377,9 @@ async function nuevoDesvio(){
   try{ await cargarBase(); }
   catch(err){ aviso(err.message, 'err'); return; }
   ed = {id:null, linea:'', variantes:[], sentido:null, titulo:'', motivo:'', observaciones:'',
-        principal:'', entre:'', recorridoTexto:'', calles:[], sentidoFiltro:'ambos',
-        estado:'borrador', desde:null, hasta:null, recorrido:[], vertices:[],
+        principal:'', entre:'', sentidoFiltro:'ambos', dibujando:'A',
+        traz:{A:{v:[], calles:[], texto:''}, B:{v:[], calles:[], texto:''}},
+        estado:'borrador', desde:null, hasta:null, recorrido:[],
         suspendidas:[], provisorias:[], vars:[]};
   abrirEditor();
 }
@@ -1289,11 +1393,12 @@ async function editarDesvio(d){
   ed = {id:d.id, linea:d.linea, variantes:d.variantes || [], sentido:d.sentido,
         titulo:d.titulo, motivo:d.motivo || '', observaciones:d.observaciones || '',
         principal:d.principal || '', entre:d.entre || '',
-        recorridoTexto:d.recorrido_texto || '', calles:((d.resumen && d.resumen.calles) || []).slice(),
         sentidoFiltro:(d.sentido === 'A' ? 'A' : (d.sentido === 'B' ? 'B' : 'ambos')),
+        dibujando:(d.sentido === 'B' ? 'B' : 'A'),
+        traz: trazDesde(d),
         estado:d.estado, desde:d.desde, hasta:d.hasta,
         recorrido:(d.recorrido || []).slice(),
-        vertices:((d.resumen && d.resumen.vertices) || (d.recorrido || [])).slice(),
+
         suspendidas:(d.paradas_suspendidas || []).slice(),
         provisorias:(d.paradas_provisorias || []).map(p => Object.assign({}, p)),
         vars:elegidas};
@@ -1309,8 +1414,7 @@ function abrirEditor(){
   $('edLinea').value = ed.linea || '';
   $('edTitulo').value = ed.titulo || '';
   $('edMotivo').value = ed.motivo || '';
-  $('edRecorrido').value = ed.recorridoTexto || '';
-  $('edRecorrido').dataset.tocado = ed.recorridoTexto ? '1' : '0';
+  pintarDibujando();
   $('edPrincipal').value = ed.principal || '';
   $('edEntre').value = ed.entre || '';
   $('edObs').value = ed.observaciones || '';
@@ -1418,14 +1522,16 @@ function clicMapa(e){
   if(modo !== 'editor' || !ed || !herramienta) return;
   if(herramienta === 'recorrido'){
     const p = [+e.latlng.lat.toFixed(6), +e.latlng.lng.toFixed(6)];
-    ed.vertices.push(p);
+    const t = trazActual();
+    t.v.push(p);
     ed.recorrido = recorridoPlano();
     dibujarEdicion();
-    const idx = ed.vertices.length - 1;
+    const idx = t.v.length - 1, sentido = ed.dibujando;
     calleDelPunto(p).then(function(nombre){
-      if(!ed || ed.vertices.length <= idx) return;
-      if(nombre && ed.calles[ed.calles.length - 1] !== nombre) ed.calles.push(nombre);
-      proponerRecorrido();
+      if(!ed || ed.traz[sentido].v.length <= idx) return;
+      const cc = ed.traz[sentido].calles;
+      if(nombre && cc[cc.length - 1] !== nombre) cc.push(nombre);
+      proponerRecorrido(sentido);
     });
   }else if(herramienta === 'provisoria'){
     const punto = [+e.latlng.lat.toFixed(6), +e.latlng.lng.toFixed(6)];
@@ -1478,10 +1584,19 @@ function dibujarEdicion(){
          dashArray:'3 6', interactive:false};
     for(const parte of t.partes) capaEdicion.addLayer(L.polyline(parte, estilo));
   }
-  if(ed.recorrido.length > 1)
-    capaEdicion.addLayer(L.polyline(ed.recorrido, {color:'#c47f00', weight:5, dashArray:'10 7', interactive:false}));
-  for(const p of ed.vertices)
-    capaEdicion.addLayer(L.circleMarker(p, {radius:4, color:'#6b4a00', weight:2, fillColor:'#fff', fillOpacity:1, renderer, interactive:false}));
+  for(const s of ['A','B']){
+    const t = ed.traz[s];
+    if(t.v.length < 2 && !(t.v.length && s === ed.dibujando)) continue;
+    const activo = (s === ed.dibujando);
+    if(t.v.length > 1) capaEdicion.addLayer(L.polyline(t.v, {
+      color: s === 'A' ? '#c47f00' : '#1E6FA8',
+      weight: activo ? 5 : 4, opacity: activo ? 1 : .6,
+      dashArray:'10 7', interactive:false}));
+    for(const p of t.v)
+      capaEdicion.addLayer(L.circleMarker(p, {radius: activo ? 4 : 3,
+        color: s === 'A' ? '#6b4a00' : '#124e77', weight:2,
+        fillColor:'#fff', fillOpacity: activo ? 1 : .6, renderer, interactive:false}));
+  }
   for(const p of ed.provisorias){
     const m = L.circleMarker([p.lat, p.lon], {radius:7, color:'#1E7A3C', weight:2, fillColor:'#7ED9A0', fillOpacity:1, renderer});
     m.bindTooltip(esc('Provisoria: ' + (p.nombre || 'sin referencia') + ' — tocar para corregir'), {direction:'top'});
@@ -1496,24 +1611,30 @@ function dibujarEdicion(){
     });
     capaEdicion.addLayer(m);
   }
+  const tA = ed.traz.A.v.length, tB = ed.traz.B.v.length;
   $('edResumen').innerHTML =
-    '<span>' + ed.vertices.length + ' puntos de trazado</span>' +
+    '<span>ida: ' + tA + ' punto' + (tA===1?'':'s') + (tB ? ' · vuelta: ' + tB + ' punto' + (tB===1?'':'s') : '') + '</span>' +
     '<span>' + ed.suspendidas.length + ' suspendidas</span>' +
     '<span>' + ed.provisorias.length + ' provisorias</span>';
 }
 
 function deshacerTrazo(){
-  if(!ed || !ed.vertices.length) return;
-  ed.vertices.pop();
-  if(ed.calles.length) ed.calles.pop();
+  if(!ed) return;
+  const t = trazActual();
+  if(!t.v.length) return;
+  t.v.pop();
+  if(t.calles.length) t.calles.pop();
   ed.recorrido = recorridoPlano();
-  proponerRecorrido();
+  proponerRecorrido(ed.dibujando);
   dibujarEdicion();
 }
 function borrarTrazo(){
   if(!ed) return;
-  ed.vertices = []; ed.recorrido = []; ed.calles = [];
-  if($('edRecorrido').dataset.tocado !== '1'){ $('edRecorrido').value = ''; ed.recorridoTexto = ''; }
+  const t = trazActual();
+  t.v = []; t.calles = []; t.texto = '';
+  ed.recorrido = [];
+  $('edRecorrido').value = '';
+  $('edRecorrido').dataset.tocado = '0';
   dibujarEdicion();
 }
 
@@ -1529,8 +1650,9 @@ function armarResumen(){
       if(parte.length > 1) origs.push(parte.map(function(p){ return [+p[0].toFixed(5), +p[1].toFixed(5)]; }));
   }
   return {
-    calles: ed.calles,
-    vertices: ed.vertices,
+    traz: {A: {v: ed.traz.A.v, calles: ed.traz.A.calles, texto: ed.traz.A.texto},
+           B: {v: ed.traz.B.v, calles: ed.traz.B.calles, texto: ed.traz.B.texto}},
+    vertices: ed.traz.A.v.length ? ed.traz.A.v : ed.traz.B.v,
     lineas: ed.vars.map(function(v){ return v[0]; }).filter(function(x,i,a){ return a.indexOf(x)===i; }),
     recorridos: ed.vars.map(function(v){
       return {linea:v[0], sentido:v[4], destino:v[3],
@@ -1553,7 +1675,13 @@ async function guardar(nuevoEstado){
              : (sents.length === 1 ? sents[0] : null);
   ed.titulo = $('edTitulo').value.trim();
   ed.motivo = $('edMotivo').value.trim();
-  ed.recorridoTexto = $('edRecorrido').value.trim();
+  const campoRec = $('edRecorrido');
+  trazActual().texto = campoRec.value.trim();
+  trazActual().tocado = campoRec.dataset.tocado === '1';
+  const conTraz = sentidosConTrazado();
+  ed.recorridoTexto = conTraz.length > 1
+    ? ('Ida: ' + (ed.traz.A.texto || 's/d') + '  ·  Vuelta: ' + (ed.traz.B.texto || 's/d'))
+    : (ed.traz[conTraz[0] || ed.dibujando].texto || '');
   ed.principal = $('edPrincipal').value.trim();
   ed.entre = $('edEntre').value.trim();
   ed.observaciones = $('edObs').value.trim();
@@ -1564,8 +1692,10 @@ async function guardar(nuevoEstado){
   ed.desde = fd; ed.hasta = fh;
   if(!ed.linea){ aviso('Elegí al menos una línea afectada', 'err'); return; }
   if(!ed.titulo){ aviso('Falta el título del desvío', 'err'); return; }
-  ed.recorrido = recorridoPlano();
-  if(nuevoEstado === 'activo' && ed.recorrido.length < 2 && !ed.suspendidas.length){
+  const partes = sentidosConTrazado().map(function(s){ return ed.traz[s].v; });
+  ed.recorrido = partes.length > 1 ? partes : (partes[0] || []);
+  const hayTrazado = partes.length > 0;
+  if(nuevoEstado === 'activo' && !hayTrazado && !ed.suspendidas.length){
     aviso('Para publicar, trazá el recorrido provisorio o marcá al menos una parada suspendida', 'err');
     return;
   }

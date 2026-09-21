@@ -1231,12 +1231,14 @@ function alternarLinea(linea, vars){
   if(!nuevos.length){ aviso('La línea ' + linea + ' no tiene recorridos por ahí', 'err'); return; }
   for(const v of nuevos) ed.vars.push(v);
   pintarElegidos(); dibujarEdicion();
+  if(herramienta === 'suspender') dibujarParadasLinea();
 }
 
 function quitarVariante(cod){
   if(!ed) return;
   ed.vars = ed.vars.filter(function(v){ return v[6] !== cod; });
   pintarElegidos(); dibujarEdicion();
+  if(herramienta === 'suspender') dibujarParadasLinea();
   buscarPorCalle($('calle').value);
 }
 
@@ -1295,6 +1297,7 @@ function cambiarSentido(s){
     ed.dibujando = s;
   }
   pintarElegidos(); pintarDibujando(); dibujarEdicion();
+  if(herramienta === 'suspender') dibujarParadasLinea();
   if($('calle').value.trim()) buscarPorCalle($('calle').value);
 }
 
@@ -1483,6 +1486,7 @@ function elegirVariante(cod){
   $('edVariante').value = '';
   pintarElegidos();
   dibujarEdicion();
+  if(herramienta === 'suspender') dibujarParadasLinea();
   const pts = v[9].map(coordParada).filter(Boolean);
   if(pts.length) mapa.fitBounds(L.latLngBounds(pts), {padding:[40,40]});
 }

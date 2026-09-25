@@ -1284,8 +1284,12 @@ function buscarPorCalle(txt){
 }
 
 // agrupa puntos encadenando los que están a menos de 5 km y devuelve el grupo mayor
-function grupoPrincipal(pts){
-  if(pts.length < 3) return pts;
+// Agrupa los puntos de traza por cercanía, para separar calles homónimas
+// lejanas entre sí (o, dentro de la misma Montevideo, dos calles distintas
+// que comparten una palabra en el nombre — p. ej. "Dr. Joaquín de Salterain"
+// y "Eduardo Salterain y Herrera").
+function agruparPorCercania(pts){
+  if(pts.length < 3) return [pts];
   const n = pts.length, g = new Array(n).fill(-1);
   let c = 0;
   for(let i = 0; i < n; i++){
@@ -1302,12 +1306,41 @@ function grupoPrincipal(pts){
       }
     }
   }
-  if(c === 1) return pts;
-  const cuenta = new Array(c).fill(0);
-  for(const x of g) cuenta[x]++;
-  let mejor = 0;
-  for(let i = 1; i < c; i++) if(cuenta[i] > cuenta[mejor]) mejor = i;
-  return pts.filter(function(p, i){ return g[i] === mejor; });
+  const grupos = [];
+  for(let i = 0; i < c; i++) grupos.push([]);
+  for(let i = 0; i < n; i++) grupos[g[i]].push(pts[i]);
+  grupos.sort(function(a, b){ return b.length - a.length; });
+  return grupos;
+}
+
+// Cuántas líneas circulan "de verdad" por un conjunto de puntos: exige que
+// aparezcan cerca de al menos dos de ellos cuando hay puntos suficientes
+// como para que eso distinga circular de solo cruzar (mismo criterio que
+// se usa para la calle entera más abajo).
+function contarLineasDe(pts){
+  const conteo = new Map();
+  for(const p of pts) for(const vi of variantesCerca(p[0], p[1])){
+    const l = D_VARS[vi][0];
+    conteo.set(l, (conteo.get(l) || 0) + 1);
+  }
+  const minimo = pts.length >= 4 ? 2 : 1;
+  let n2 = 0;
+  conteo.forEach(function(cant){ if(cant >= minimo) n2++; });
+  return n2;
+}
+
+// Se queda con el grupo por el que de verdad circulan líneas, no con el que
+// tiene más tramos: una calle puede tener muchos tramos digitalizados y
+// ninguna línea, y ese no es el resultado que le sirve a quien busca.
+function grupoPrincipal(pts){
+  const grupos = agruparPorCercania(pts);
+  if(grupos.length === 1) return grupos[0];
+  let mejor = grupos[0], mejorN = contarLineasDe(grupos[0]);
+  for(let i = 1; i < grupos.length; i++){
+    const n2 = contarLineasDe(grupos[i]);
+    if(n2 > mejorN){ mejor = grupos[i]; mejorN = n2; }
+  }
+  return mejor;
 }
 
 function paradaMasCerca(lat, lon, radio){

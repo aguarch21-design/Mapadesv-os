@@ -564,10 +564,22 @@ function bloquesComunicado(d){
   }];
 }
 
+// Convierte un texto libre (p.ej. un nombre de calle) en algo apto para
+// nombre de archivo: sin tildes, sin espacios ni símbolos.
+function slugArchivo(s){
+  return String(s || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+}
+
 function nombrePDF(d){
+  const calle = slugArchivo(d.principal);
+  if(calle) return 'desvio-' + calle + '.pdf';
   const ls = (d.lineas && d.lineas.length) ? d.lineas : [d.linea];
-  const f = new Date(d.actualizado_en || Date.now()).toISOString().slice(0,10);
-  return 'desvio-lineas-' + ls.join('-') + '-' + f + '.pdf';
+  return 'desvio-lineas-' + ls.join('-') + '.pdf';
 }
 
 function generarPDF(d, devolver){
@@ -616,29 +628,12 @@ function generarPDF(d, devolver){
   doc.text('Montevideo, ' + hoy.getDate() + ' de ' + MESES[hoy.getMonth()] +
            ' de ' + hoy.getFullYear() + '.-', DER, 53, {align:'right'});
 
-  // título (incluye la calle principal del corte, si está cargada)
-  doc.setFont('helvetica','bold');
-  const tituloTxt = 'DESVÍO' + (d.principal ? ' — ' + d.principal : '');
-  const anchoTitulo = W - 6;
-  let tFont = 11;
-  doc.setFontSize(tFont);
-  while(tFont > 8 && doc.getTextWidth(tituloTxt) > anchoTitulo){
-    tFont -= 0.5;
-    doc.setFontSize(tFont);
-  }
-  let lineasTitulo = [tituloTxt];
-  if(doc.getTextWidth(tituloTxt) > anchoTitulo){
-    lineasTitulo = doc.splitTextToSize(tituloTxt, anchoTitulo);
-  }
-  const altoTitulo = Math.max(8, lineasTitulo.length * 5.5 + 2.5);
+  // título
   doc.setLineWidth(0.4);
-  doc.rect(M, 57, W, altoTitulo);
-  let tY = 57 + (altoTitulo - lineasTitulo.length * 5.5) / 2 + 4.3;
-  for(const lt of lineasTitulo){
-    doc.text(lt, 105, tY, {align:'center'});
-    tY += 5.5;
-  }
-  const finTitulo = 57 + altoTitulo;
+  doc.rect(M, 57, W, 8);
+  doc.setFont('helvetica','bold'); doc.setFontSize(11);
+  doc.text('DESVÍO', 105, 62.4, {align:'center'});
+  const finTitulo = 65;
 
   // ---- tabla de items ----
   const fmt = function(iso){

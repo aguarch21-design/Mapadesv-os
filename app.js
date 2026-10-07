@@ -616,11 +616,29 @@ function generarPDF(d, devolver){
   doc.text('Montevideo, ' + hoy.getDate() + ' de ' + MESES[hoy.getMonth()] +
            ' de ' + hoy.getFullYear() + '.-', DER, 53, {align:'right'});
 
-  // título
+  // título (incluye la calle principal del corte, si está cargada)
+  doc.setFont('helvetica','bold');
+  const tituloTxt = 'DESVÍO' + (d.principal ? ' — ' + d.principal : '');
+  const anchoTitulo = W - 6;
+  let tFont = 11;
+  doc.setFontSize(tFont);
+  while(tFont > 8 && doc.getTextWidth(tituloTxt) > anchoTitulo){
+    tFont -= 0.5;
+    doc.setFontSize(tFont);
+  }
+  let lineasTitulo = [tituloTxt];
+  if(doc.getTextWidth(tituloTxt) > anchoTitulo){
+    lineasTitulo = doc.splitTextToSize(tituloTxt, anchoTitulo);
+  }
+  const altoTitulo = Math.max(8, lineasTitulo.length * 5.5 + 2.5);
   doc.setLineWidth(0.4);
-  doc.rect(M, 57, W, 8);
-  doc.setFont('helvetica','bold'); doc.setFontSize(11);
-  doc.text('DESVÍO', 105, 62.4, {align:'center'});
+  doc.rect(M, 57, W, altoTitulo);
+  let tY = 57 + (altoTitulo - lineasTitulo.length * 5.5) / 2 + 4.3;
+  for(const lt of lineasTitulo){
+    doc.text(lt, 105, tY, {align:'center'});
+    tY += 5.5;
+  }
+  const finTitulo = 57 + altoTitulo;
 
   // ---- tabla de items ----
   const fmt = function(iso){
@@ -651,7 +669,7 @@ function generarPDF(d, devolver){
   items.push(['Observaciones', d.observaciones || '']);
 
   const X0 = M + 4, ANCHO = W - 8, COL = 52, PADX = 2.2, INTER = 4.6;
-  let y = 69;
+  let y = finTitulo + 4;
   const marcoY = y;
   doc.setLineWidth(0.3);
   doc.setFontSize(9.5);

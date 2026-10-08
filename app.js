@@ -29,6 +29,7 @@ const REFRESCO_MS = 45000;
 let sb = null, sesion = null, esEditor = false;
 let desvios = [], seleccionado = null;
 let filtro = '';                         // texto del buscador (visor)
+const lineasSel = new Set();             // botones de línea tocados (se acumulan)
 let modo = 'visor';                       // visor | editor
 let ed = null;                            // desvío en edición
 let baseCargada = false;
@@ -367,7 +368,15 @@ function pajarDe(d){
   return p;
 }
 
+function lineasDe(d){
+  return ((d.lineas && d.lineas.length) ? d.lineas : [d.linea]).map(String);
+}
+function filtroActivo(){ return !!(filtro.trim() || lineasSel.size); }
+
+// Los filtros se acumulan: las líneas tocadas suman (151 + 370 muestra ambas)
+// y el texto escrito achica el resultado dentro de ellas.
 function coincide(d){
+  if(lineasSel.size && !lineasDe(d).some(l => lineasSel.has(l))) return false;
   const toks = sinAcentos(filtro).split(/\s+/).filter(Boolean);
   if(!toks.length) return true;
   const pajar = pajarDe(d);
@@ -390,20 +399,29 @@ function pintarAtajosLineas(){
   ls.forEach(l => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'lchip' + (filtro.trim() === l ? ' on' : '');
+    const on = lineasSel.has(l);
+    b.className = 'lchip' + (on ? ' on' : '');
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
     b.textContent = l;
-    b.title = 'Ver los desvíos de la línea ' + l;
-    b.onclick = () => ponerFiltro(filtro.trim() === l ? '' : l);
+    b.title = (on ? 'Quitar la línea ' : 'Sumar la línea ') + l;
+    b.onclick = () => {
+      if(lineasSel.has(l)) lineasSel.delete(l); else lineasSel.add(l);
+      actualizarBotonLimpiar();
+      aplicarFiltro(true);
+    };
     cont.appendChild(b);
   });
 }
 
-function ponerFiltro(txt){
-  filtro = txt || '';
-  const inp = $('busq');
-  if(inp.value !== filtro) inp.value = filtro;
-  $('busqLimpiar').hidden = !filtro;
-  aplicarFiltro(true);
+function actualizarBotonLimpiar(){ $('busqLimpiar').hidden = !filtroActivo(); }
+
+// Borra TODO lo acumulado: texto y líneas elegidas
+function limpiarFiltros(){
+  filtro = '';
+  lineasSel.clear();
+  $('busq').value = '';
+  actualizarBotonLimpiar();
+  aplicarFiltro(false);
 }
 
 function puntosDesvio(d){
@@ -420,7 +438,7 @@ function aplicarFiltro(ajustarMapa){
   if(seleccionado && !visibles().some(d => d.id === seleccionado.id)) seleccionado = null;
   pintarLista();
   dibujarDesvios();
-  if(ajustarMapa && filtro.trim() && modo !== 'editor'){
+  if(ajustarMapa && filtroActivo() && modo !== 'editor'){
     const pts = [];
     visibles().forEach(d => puntosDesvio(d).forEach(p => pts.push(p)));
     if(pts.length) mapa.fitBounds(L.latLngBounds(pts), {padding:[40,40], maxZoom:17});
@@ -441,15 +459,16 @@ function pintarLista(){
     return;
   }
   if(!lista.length){
-    cont.innerHTML = '<div class="vacio">Ningún desvío coincide con «<span id="vacioQ"></span>».<br>' +
-      'Probá con el número de línea, el nombre de la calle o el código de la parada.<br>' +
-      '<button class="chip primario" id="btnVerTodos">Ver todos</button></div>';
-    $('vacioQ').textContent = filtro.trim();
-    $('btnVerTodos').onclick = () => ponerFiltro('');
+    cont.innerHTML = '<div class="vacio">Ningún desvío cumple todos los filtros<span id="vacioQ"></span>.<br>' +
+      'Probá sacar alguno, o buscar por línea, calle o código de parada.<br>' +
+      '<button class="chip primario" id="btnVerTodos">Quitar filtros</button></div>';
+    const dq = [].concat(Array.from(lineasSel).map(l => 'línea ' + l), filtro.trim() ? ['«' + filtro.trim() + '»'] : []);
+    $('vacioQ').textContent = dq.length ? ' (' + dq.join(' + ') + ')' : '';
+    $('btnVerTodos').onclick = limpiarFiltros;
     $('resumenTop').textContent = '0 de ' + base.length + (base.length === 1 ? ' desvío' : ' desvíos');
     return;
   }
-  $('resumenTop').textContent = filtro.trim()
+  $('resumenTop').textContent = filtroActivo()
     ? lista.length + ' de ' + base.length + (base.length === 1 ? ' desvío' : ' desvíos')
     : textoAct;
   for(const d of lista){
@@ -2216,10 +2235,10 @@ async function iniciar(){
   $('pass').addEventListener('keydown', e => { if(e.key === 'Enter') entrar(); });
   $('btnSalir').onclick = salir;
   $('btnActualizar').onclick = cargarDesvios;
-  $('busq').addEventListener('input', e => { filtro = e.target.value; $('busqLimpiar').hidden = !filtro; aplicarFiltro(false); });
+  $('busq').addEventListener('input', e => { filtro = e.target.value; actualizarBotonLimpiar(); aplicarFiltro(false); });
   $('busq').addEventListener('change', () => aplicarFiltro(true));
   $('busq').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); aplicarFiltro(true); e.target.blur(); } });
-  $('busqLimpiar').onclick = () => { ponerFiltro(''); $('busq').focus(); };
+  $('busqLimpiar').onclick = () => { limpiarFiltros(); $('busq').focus(); };
   $('btnNuevo').onclick = nuevoDesvio;
   $('btnCerrarEditor').onclick = cerrarEditor;
   $('calle').addEventListener('input', e => { asegurarCalles(); buscarPorCalle(e.target.value); });

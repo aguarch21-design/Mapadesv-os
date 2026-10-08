@@ -153,7 +153,22 @@
 
   label.tgl{display:flex; align-items:center; gap:8px; font-size:12.5px; margin:6px 0 8px; cursor:pointer}
   label.tgl input{accent-color:var(--navy); width:15px; height:15px}
-  body.editando #lista, body.editando .barra{display:none}
+  body.editando #lista, body.editando .barra, body.editando .buscador{display:none}
+
+  /* --- buscador (visor) --- */
+  .buscador{position:sticky; top:0; z-index:5; background:var(--card);
+    padding:10px 14px 8px; border-bottom:1px solid var(--line)}
+  .busq-caja{position:relative}
+  .busq-caja input{padding-right:34px; -webkit-appearance:none; appearance:none}
+  .busq-caja input::-webkit-search-cancel-button{display:none}
+  .busq-x{position:absolute; right:4px; top:50%; transform:translateY(-50%); width:30px; height:30px;
+    border:none; background:none; color:var(--muted); font-size:20px; line-height:1; cursor:pointer}
+  .busq-x:hover{color:var(--danger)}
+  .busq-lineas{display:flex; gap:6px; overflow-x:auto; padding:8px 0 2px; -webkit-overflow-scrolling:touch}
+  .busq-lineas:empty{display:none}
+  .busq-lineas .lchip{flex:0 0 auto; border:1.5px solid transparent; font-weight:800}
+  .busq-lineas .lchip.on{background:var(--navy); color:#fff}
+  #lista .vacio button{margin-top:10px}
   body.editando #panelEditor{border-top:none}
 
   @media (max-width:820px){
@@ -209,6 +224,16 @@
       <button class="mini" id="btnPDF" title="Descargar la comunicación en PDF">PDF</button>
       <button class="mini soloEditor" id="btnCorreo" title="Enviar por correo a las casillas cargadas">Correo</button>
       <button class="mini soloEditor" id="btnCopiar" title="Copiar el texto del desvío">Copiar</button>
+    </div>
+
+    <div class="buscador soloSesion" id="buscador">
+      <div class="busq-caja">
+        <input type="search" id="busq" placeholder="Buscar línea, calle, parada o motivo…"
+               autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"
+               aria-label="Buscar desvíos">
+        <button class="busq-x" id="busqLimpiar" type="button" aria-label="Borrar búsqueda" hidden>×</button>
+      </div>
+      <div class="busq-lineas" id="busqLineas" aria-label="Líneas con desvío"></div>
     </div>
 
     <div id="lista"></div>

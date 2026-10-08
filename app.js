@@ -28,6 +28,7 @@ const REFRESCO_MS = 45000;
 
 let sb = null, sesion = null, esEditor = false;
 let desvios = [], seleccionado = null;
+let filtro = '';                         // texto del buscador (visor)
 let modo = 'visor';                       // visor | editor
 let ed = null;                            // desvío en edición
 let baseCargada = false;
@@ -339,16 +340,118 @@ async function cargarDesvios(){
 
 function activos(){ return desvios.filter(d => d.estado === 'activo'); }
 
+/* ---------- BUSCADOR ----------
+   Busca en lo que el personal pregunta por teléfono: línea, calle o cruce,
+   código o nombre de parada (suspendida o provisoria), título, motivo,
+   recorrido y observaciones. Varias palabras se combinan (todas deben
+   aparecer): "151 menorca". Los números se comparan enteros, así "15" no
+   trae el 151.                                                          */
+const _pajar = new WeakMap();
+
+function pajarDe(d){
+  let p = _pajar.get(d);
+  if(p) return p;
+  const r = d.resumen || {};
+  const partes = [];
+  const ls = (d.lineas && d.lineas.length) ? d.lineas : [d.linea];
+  ls.forEach(l => partes.push(l));
+  [d.titulo, d.principal, d.entre, d.motivo, d.observaciones, d.recorrido_texto,
+   textoRecorrido(d), d.estado].forEach(x => { if(x) partes.push(x); });
+  const susp = (r.paradas_suspendidas || []).slice();
+  (r.grupos || []).forEach(g => (g.paradas_suspendidas || []).forEach(x => susp.push(x)));
+  susp.forEach(x => { if(x){ partes.push(x.cod, x.nombre); } });
+  (d.paradas_suspendidas || []).forEach(c => partes.push(c));
+  (d.paradas_provisorias || []).forEach(x => { if(x) partes.push(x.nombre, x.referencia); });
+  p = sinAcentos(partes.filter(x => x != null && x !== '').join(' | '));
+  _pajar.set(d, p);
+  return p;
+}
+
+function coincide(d){
+  const toks = sinAcentos(filtro).split(/\s+/).filter(Boolean);
+  if(!toks.length) return true;
+  const pajar = pajarDe(d);
+  return toks.every(t => {
+    if(/^\d+$/.test(t)) return new RegExp('(^|[^0-9])' + t + '([^0-9]|$)').test(pajar);
+    return pajar.indexOf(t) >= 0;
+  });
+}
+
+function baseLista(){ return esEditor ? desvios : activos(); }
+function visibles(){ return baseLista().filter(coincide); }
+
+function pintarAtajosLineas(){
+  const cont = $('busqLineas');
+  if(!cont) return;
+  const set = new Set();
+  activos().forEach(d => ((d.lineas && d.lineas.length) ? d.lineas : [d.linea]).forEach(l => { if(l) set.add(String(l)); }));
+  const ls = Array.from(set).sort((a,b) => a.localeCompare(b, 'es', {numeric:true}));
+  cont.innerHTML = '';
+  ls.forEach(l => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'lchip' + (filtro.trim() === l ? ' on' : '');
+    b.textContent = l;
+    b.title = 'Ver los desvíos de la línea ' + l;
+    b.onclick = () => ponerFiltro(filtro.trim() === l ? '' : l);
+    cont.appendChild(b);
+  });
+}
+
+function ponerFiltro(txt){
+  filtro = txt || '';
+  const inp = $('busq');
+  if(inp.value !== filtro) inp.value = filtro;
+  $('busqLimpiar').hidden = !filtro;
+  aplicarFiltro(true);
+}
+
+function puntosDesvio(d){
+  const pts = [];
+  const rec = d.recorrido || [];
+  const planos = (rec.length && Array.isArray(rec[0]) && Array.isArray(rec[0][0])) ? [].concat.apply([], rec) : rec;
+  planos.forEach(p => pts.push(p));
+  ((d.resumen && d.resumen.paradas_suspendidas) || []).forEach(p => pts.push([p.lat, p.lon]));
+  (d.paradas_provisorias || []).forEach(p => pts.push([p.lat, p.lon]));
+  return pts;
+}
+
+function aplicarFiltro(ajustarMapa){
+  if(seleccionado && !visibles().some(d => d.id === seleccionado.id)) seleccionado = null;
+  pintarLista();
+  dibujarDesvios();
+  if(ajustarMapa && filtro.trim() && modo !== 'editor'){
+    const pts = [];
+    visibles().forEach(d => puntosDesvio(d).forEach(p => pts.push(p)));
+    if(pts.length) mapa.fitBounds(L.latLngBounds(pts), {padding:[40,40], maxZoom:17});
+  }
+}
+
 function pintarLista(){
   const cont = $('lista');
   cont.innerHTML = '';
-  const lista = esEditor ? desvios : activos();
-  if(!lista.length){
+  pintarAtajosLineas();
+  const base = baseLista();
+  const lista = visibles();
+  const nAct = activos().length;
+  const textoAct = nAct + (nAct === 1 ? ' desvío activo' : ' desvíos activos');
+  if(!base.length){
     cont.innerHTML = '<div class="vacio">No hay desvíos ' + (esEditor ? 'cargados' : 'activos en este momento') + '.</div>';
     $('resumenTop').textContent = esEditor ? 'Sin desvíos' : 'Sin desvíos activos';
     return;
   }
-  $('resumenTop').textContent = activos().length + (activos().length === 1 ? ' desvío activo' : ' desvíos activos');
+  if(!lista.length){
+    cont.innerHTML = '<div class="vacio">Ningún desvío coincide con «<span id="vacioQ"></span>».<br>' +
+      'Probá con el número de línea, el nombre de la calle o el código de la parada.<br>' +
+      '<button class="chip primario" id="btnVerTodos">Ver todos</button></div>';
+    $('vacioQ').textContent = filtro.trim();
+    $('btnVerTodos').onclick = () => ponerFiltro('');
+    $('resumenTop').textContent = '0 de ' + base.length + (base.length === 1 ? ' desvío' : ' desvíos');
+    return;
+  }
+  $('resumenTop').textContent = filtro.trim()
+    ? lista.length + ' de ' + base.length + (base.length === 1 ? ' desvío' : ' desvíos')
+    : textoAct;
   for(const d of lista){
     const el = document.createElement('button');
     el.className = 'card' + (seleccionado && seleccionado.id === d.id ? ' sel' : '') + ' e-' + d.estado;
@@ -383,10 +486,7 @@ function seleccionar(d){
   seleccionado = d;
   pintarLista();
   dibujarDesvios();
-  const pts = [];
-  (d.recorrido || []).forEach(p => pts.push(p));
-  ((d.resumen && d.resumen.paradas_suspendidas) || []).forEach(p => pts.push([p.lat, p.lon]));
-  (d.paradas_provisorias || []).forEach(p => pts.push([p.lat, p.lon]));
+  const pts = puntosDesvio(d);
   if(pts.length) mapa.fitBounds(L.latLngBounds(pts), {padding:[40,40]});
   if(window.innerWidth <= 820) $('map').scrollIntoView({behavior:'smooth', block:'nearest'});
 }
@@ -394,7 +494,7 @@ function seleccionar(d){
 function dibujarDesvios(){
   capaDesvios.clearLayers();
   if(modo === 'editor') return;   // editando: el mapa muestra solo la propuesta en curso
-  const lista = (esEditor ? desvios : activos()).filter(d => !seleccionado || d.id === seleccionado.id || d.estado === 'activo');
+  const lista = visibles().filter(d => !seleccionado || d.id === seleccionado.id || d.estado === 'activo');
   for(const d of lista){
     const foco = seleccionado && seleccionado.id === d.id;
     const op = (!seleccionado || foco) ? 1 : .35;
@@ -2116,6 +2216,10 @@ async function iniciar(){
   $('pass').addEventListener('keydown', e => { if(e.key === 'Enter') entrar(); });
   $('btnSalir').onclick = salir;
   $('btnActualizar').onclick = cargarDesvios;
+  $('busq').addEventListener('input', e => { filtro = e.target.value; $('busqLimpiar').hidden = !filtro; aplicarFiltro(false); });
+  $('busq').addEventListener('change', () => aplicarFiltro(true));
+  $('busq').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); aplicarFiltro(true); e.target.blur(); } });
+  $('busqLimpiar').onclick = () => { ponerFiltro(''); $('busq').focus(); };
   $('btnNuevo').onclick = nuevoDesvio;
   $('btnCerrarEditor').onclick = cerrarEditor;
   $('calle').addEventListener('input', e => { asegurarCalles(); buscarPorCalle(e.target.value); });

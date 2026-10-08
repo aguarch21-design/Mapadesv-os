@@ -377,13 +377,22 @@ function filtroActivo(){ return !!(filtro.trim() || lineasSel.size); }
 // y el texto escrito achica el resultado dentro de ellas.
 function coincide(d){
   if(lineasSel.size && !lineasDe(d).some(l => lineasSel.has(l))) return false;
-  const toks = sinAcentos(filtro).split(/\s+/).filter(Boolean);
-  if(!toks.length) return true;
+  const grupos = filtro.split(/[,;]+/)
+    .map(g => sinAcentos(g).split(/\s+/).filter(Boolean))
+    .filter(g => g.length);
+  if(!grupos.length) return true;
   const pajar = pajarDe(d);
-  return toks.every(t => {
+  const unToken = t => {
     if(/^\d+$/.test(t)) return new RegExp('(^|[^0-9])' + t + '([^0-9]|$)').test(pajar);
-    return pajar.indexOf(t) >= 0;
-  });
+    // el texto busca al comienzo de una palabra ("menor" trae Menorca, pero
+    // "ute" no trae "minutos"); hasta 2 letras tiene que ser la palabra entera
+    const e = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp('(^|[^a-z0-9])' + e + (t.length <= 2 ? '([^a-z0-9]|$)' : '')).test(pajar);
+  };
+  // Varias búsquedas separadas por coma: alcanza con que cumpla una ("151, 370").
+  // Dentro de cada una, todas las palabras tienen que estar ("151 menorca").
+  // Solo números sueltos ("151 370") se toman como alternativas.
+  return grupos.some(g => (g.length > 1 && g.every(t => /^\d+$/.test(t))) ? g.some(unToken) : g.every(unToken));
 }
 
 function baseLista(){ return esEditor ? desvios : activos(); }

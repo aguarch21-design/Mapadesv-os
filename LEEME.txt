@@ -87,6 +87,21 @@ COMO SE USA
     - verde = paradas provisorias
     - se actualiza solo cada 45 segundos y al volver a la pantalla
 
+  Buscar (cualquiera con cuenta):
+    - caja de busqueda arriba de la lista: acepta linea (151), calle o cruce
+      (menorca), codigo o nombre de parada (4821), motivo o texto del recorrido
+    - varias palabras se combinan: "151 menorca" trae solo los desvios que
+      cumplen las dos cosas. Para buscar mas de una cosa a la vez se separa
+      con coma: "151, 370" o "menorca, mallorca" traen los de cualquiera.
+      Solo numeros con espacio ("151 370") tambien se toman como alternativas. Los numeros van enteros: "15" no trae el 151
+    - debajo hay botones con las lineas que tienen desvio activo. Se pueden
+      tocar varios: se suman (151 + 370 muestra los desvios de las dos) y
+      tocar uno de nuevo lo saca
+    - los botones y el texto se acumulan: con 151 y 370 elegidas, escribir
+      "marcha" deja solo los de esas lineas que mencionan marcha
+    - la x de la caja saca todos los filtros de una
+    - filtra la lista y el mapa a la vez, y el mapa se acerca a los resultados
+
   Mientras se edita, el mapa muestra unicamente la propuesta en curso: los
   desvios ya publicados se ocultan para no confundirse. Al cerrar el editor
   vuelven a aparecer.

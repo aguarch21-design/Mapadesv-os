@@ -33,6 +33,7 @@ let marcados = new Set();                 // ids marcados en modoSel
 let modo = 'visor';                       // visor | editor
 let ed = null;                            // desvío en edición
 let baseCargada = false;
+let cargaBasePromesa = null;
 let mapa, capaDesvios, capaEdicion, capaParadas, renderer;
 let herramienta = null;                   // recorrido | suspender | provisoria
 const OSRM = 'https://router.project-osrm.org/nearest/v1/driving/';
@@ -933,21 +934,48 @@ function abrirLogin(){ $('login').classList.add('on'); }
 function cerrarLogin(){ $('login').classList.remove('on'); $('pass').value = ''; }
 
 /* ================= DATOS BASE (solo editores) ================= */
+// Carga paradas.js, lineas.js y shapes.js (unos 3 MB entre los tres) la
+// primera vez que hace falta editar. Si la conexión es mala (datos móviles
+// en la calle) un <script> puede quedar colgado sin avisar: por eso hay un
+// límite de tiempo, para que nunca se quede trabado en "Cargando…" para
+// siempre y se pueda reintentar.
 function cargarBase(){
-  return new Promise((resolve, reject)=>{
-    if(baseCargada) return resolve();
-    if(window.D_PARADAS && window.D_VARS && window.D_SHAPES){ baseCargada = true; return resolve(); }
+  if(cargaBasePromesa) return cargaBasePromesa;   // ya hay una carga en curso: reusarla
+  if(baseCargada) return Promise.resolve();
+  if(window.D_PARADAS && window.D_VARS && window.D_SHAPES){ baseCargada = true; return Promise.resolve(); }
+  cargaBasePromesa = new Promise((resolve, reject)=>{
     aviso('Cargando líneas y paradas…');
-    let faltan = 3;
-    const listo = ()=>{ if(--faltan === 0){ baseCargada = true; aviso(''); resolve(); } };
+    let faltan = 3, terminado = false;
+    const limite = setTimeout(()=>{
+      if(terminado) return;
+      terminado = true;
+      cargaBasePromesa = null;
+      reject(new Error('La conexión está lenta y no terminó de cargar. Probá de nuevo.'));
+    }, 25000);
+    const listo = ()=>{
+      if(terminado) return;
+      if(--faltan === 0){
+        terminado = true;
+        clearTimeout(limite);
+        baseCargada = true; aviso(''); resolve();
+      }
+    };
+    const falla = f => {
+      if(terminado) return;
+      terminado = true;
+      clearTimeout(limite);
+      cargaBasePromesa = null;
+      reject(new Error('No se pudo cargar datos/' + f + '. Revisá la conexión y probá de nuevo.'));
+    };
     for(const f of ['paradas.js','lineas.js','shapes.js']){
       const s = document.createElement('script');
       s.src = 'datos/' + f;
       s.onload = listo;
-      s.onerror = ()=> reject(new Error('no se pudo cargar datos/' + f));
+      s.onerror = ()=> falla(f);
       document.head.appendChild(s);
     }
   });
+  return cargaBasePromesa;
 }
 
 function coordParada(cod){

@@ -341,16 +341,36 @@ async function cargarDesvios(){
 
 function activos(){ return desvios.filter(d => d.estado === 'activo'); }
 
+// Sin tildes y en minúsculas, para que "garzon" encuentre "Garzón".
+function normalizarBusqueda(s){
+  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+function coincideBusqueda(d, q){
+  if(!q) return true;
+  const ls = (d.lineas && d.lineas.length) ? d.lineas : [d.linea];
+  const texto = normalizarBusqueda(
+    [d.titulo, d.motivo, d.principal, d.entre, d.observaciones, (ls || []).join(' ')]
+      .filter(Boolean).join(' ')
+  );
+  return texto.indexOf(q) >= 0;
+}
+
 function pintarLista(){
   const cont = $('lista');
   cont.innerHTML = '';
-  const lista = esEditor ? desvios : activos();
+  const base = esEditor ? desvios : activos();
+  const q = normalizarBusqueda(($('buscador') ? $('buscador').value : '').trim());
+  const lista = q ? base.filter(d => coincideBusqueda(d, q)) : base;
   if(!lista.length){
-    cont.innerHTML = '<div class="vacio">No hay desvíos ' + (esEditor ? 'cargados' : 'activos en este momento') + '.</div>';
+    cont.innerHTML = '<div class="vacio">' + (q
+      ? 'No hay desvíos que coincidan con la búsqueda.'
+      : 'No hay desvíos ' + (esEditor ? 'cargados' : 'activos en este momento') + '.') + '</div>';
     $('resumenTop').textContent = esEditor ? 'Sin desvíos' : 'Sin desvíos activos';
     return;
   }
-  $('resumenTop').textContent = activos().length + (activos().length === 1 ? ' desvío activo' : ' desvíos activos');
+  $('resumenTop').textContent = activos().length + (activos().length === 1 ? ' desvío activo' : ' desvíos activos') +
+    (q ? ' · ' + lista.length + ' encontrado' + (lista.length === 1 ? '' : 's') : '');
   for(const d of lista){
     const el = document.createElement('button');
     el.className = 'card' + (seleccionado && seleccionado.id === d.id ? ' sel' : '') +
@@ -2185,6 +2205,7 @@ async function iniciar(){
   $('lista').addEventListener('dblclick', ()=>{ if(esEditor && !modoSel && seleccionado) editarDesvio(seleccionado); });
   $('btnSeleccionar').onclick = ()=> modoSel ? salirModoSel() : entrarModoSel();
   $('btnBorrarSel').onclick = borrarSeleccionados;
+  $('buscador').addEventListener('input', pintarLista);
   $('btnEditarSel').onclick = ()=>{ if(seleccionado) editarDesvio(seleccionado); };
   $('btnPDF').onclick = ()=>{
     if(!seleccionado){ aviso('Elegí primero un desvío de la lista', 'err'); return; }

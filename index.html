@@ -48,6 +48,10 @@
     overflow-y:auto; overflow-x:hidden}
   #map{flex:1 1 0; min-width:0; background:#dfe6ee}
 
+  .buscaBarra{padding:10px 14px 0}
+  .buscaBarra input{width:100%}
+  body.editando .buscaBarra{display:none}
+
   .barra{display:flex; align-items:center; gap:6px; padding:10px 14px; border-bottom:1px solid var(--line); flex-wrap:wrap}
   #resumenTop{font-weight:700; font-size:13px}
   #sello{font-size:11px; color:var(--muted); margin-left:auto}
@@ -216,6 +220,9 @@
 
 <main>
   <aside>
+    <div class="buscaBarra">
+      <input type="search" id="buscador" placeholder="Buscar por línea, calle o motivo…" autocomplete="off">
+    </div>
     <div class="barra">
       <span id="resumenTop" class="ocultaEnSel">Cargando…</span>
       <span id="nSelCont" class="soloSel">0 seleccionados</span>

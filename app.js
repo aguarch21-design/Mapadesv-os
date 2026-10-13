@@ -28,8 +28,8 @@ const REFRESCO_MS = 45000;
 
 let sb = null, sesion = null, esEditor = false;
 let desvios = [], seleccionado = null;
-let filtro = '';                         // texto del buscador (visor)
-const lineasSel = new Set();             // botones de línea tocados (se acumulan)
+let modoSel = false;                      // modo "seleccionar varios para borrar"
+let marcados = new Set();                 // ids marcados en modoSel
 let modo = 'visor';                       // visor | editor
 let ed = null;                            // desvío en edición
 let baseCargada = false;
@@ -341,152 +341,24 @@ async function cargarDesvios(){
 
 function activos(){ return desvios.filter(d => d.estado === 'activo'); }
 
-/* ---------- BUSCADOR ----------
-   Busca en lo que el personal pregunta por teléfono: línea, calle o cruce,
-   código o nombre de parada (suspendida o provisoria), título, motivo,
-   recorrido y observaciones. Varias palabras se combinan (todas deben
-   aparecer): "151 menorca". Los números se comparan enteros, así "15" no
-   trae el 151.                                                          */
-const _pajar = new WeakMap();
-
-function pajarDe(d){
-  let p = _pajar.get(d);
-  if(p) return p;
-  const r = d.resumen || {};
-  const partes = [];
-  const ls = (d.lineas && d.lineas.length) ? d.lineas : [d.linea];
-  ls.forEach(l => partes.push(l));
-  [d.titulo, d.principal, d.entre, d.motivo, d.observaciones, d.recorrido_texto,
-   textoRecorrido(d), d.estado].forEach(x => { if(x) partes.push(x); });
-  const susp = (r.paradas_suspendidas || []).slice();
-  (r.grupos || []).forEach(g => (g.paradas_suspendidas || []).forEach(x => susp.push(x)));
-  susp.forEach(x => { if(x){ partes.push(x.cod, x.nombre); } });
-  (d.paradas_suspendidas || []).forEach(c => partes.push(c));
-  (d.paradas_provisorias || []).forEach(x => { if(x) partes.push(x.nombre, x.referencia); });
-  p = sinAcentos(partes.filter(x => x != null && x !== '').join(' | '));
-  _pajar.set(d, p);
-  return p;
-}
-
-function lineasDe(d){
-  return ((d.lineas && d.lineas.length) ? d.lineas : [d.linea]).map(String);
-}
-function filtroActivo(){ return !!(filtro.trim() || lineasSel.size); }
-
-// Los filtros se acumulan: las líneas tocadas suman (151 + 370 muestra ambas)
-// y el texto escrito achica el resultado dentro de ellas.
-function coincide(d){
-  if(lineasSel.size && !lineasDe(d).some(l => lineasSel.has(l))) return false;
-  const grupos = filtro.split(/[,;]+/)
-    .map(g => sinAcentos(g).split(/\s+/).filter(Boolean))
-    .filter(g => g.length);
-  if(!grupos.length) return true;
-  const pajar = pajarDe(d);
-  const unToken = t => {
-    if(/^\d+$/.test(t)) return new RegExp('(^|[^0-9])' + t + '([^0-9]|$)').test(pajar);
-    // el texto busca al comienzo de una palabra ("menor" trae Menorca, pero
-    // "ute" no trae "minutos"); hasta 2 letras tiene que ser la palabra entera
-    const e = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp('(^|[^a-z0-9])' + e + (t.length <= 2 ? '([^a-z0-9]|$)' : '')).test(pajar);
-  };
-  // Varias búsquedas separadas por coma: alcanza con que cumpla una ("151, 370").
-  // Dentro de cada una, todas las palabras tienen que estar ("151 menorca").
-  // Solo números sueltos ("151 370") se toman como alternativas.
-  return grupos.some(g => (g.length > 1 && g.every(t => /^\d+$/.test(t))) ? g.some(unToken) : g.every(unToken));
-}
-
-function baseLista(){ return esEditor ? desvios : activos(); }
-function visibles(){ return baseLista().filter(coincide); }
-
-function pintarAtajosLineas(){
-  const cont = $('busqLineas');
-  if(!cont) return;
-  const set = new Set();
-  activos().forEach(d => ((d.lineas && d.lineas.length) ? d.lineas : [d.linea]).forEach(l => { if(l) set.add(String(l)); }));
-  const ls = Array.from(set).sort((a,b) => a.localeCompare(b, 'es', {numeric:true}));
-  cont.innerHTML = '';
-  ls.forEach(l => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    const on = lineasSel.has(l);
-    b.className = 'lchip' + (on ? ' on' : '');
-    b.setAttribute('aria-pressed', on ? 'true' : 'false');
-    b.textContent = l;
-    b.title = (on ? 'Quitar la línea ' : 'Sumar la línea ') + l;
-    b.onclick = () => {
-      if(lineasSel.has(l)) lineasSel.delete(l); else lineasSel.add(l);
-      actualizarBotonLimpiar();
-      aplicarFiltro(true);
-    };
-    cont.appendChild(b);
-  });
-}
-
-function actualizarBotonLimpiar(){ $('busqLimpiar').hidden = !filtroActivo(); }
-
-// Borra TODO lo acumulado: texto y líneas elegidas
-function limpiarFiltros(){
-  filtro = '';
-  lineasSel.clear();
-  $('busq').value = '';
-  actualizarBotonLimpiar();
-  aplicarFiltro(false);
-}
-
-function puntosDesvio(d){
-  const pts = [];
-  const rec = d.recorrido || [];
-  const planos = (rec.length && Array.isArray(rec[0]) && Array.isArray(rec[0][0])) ? [].concat.apply([], rec) : rec;
-  planos.forEach(p => pts.push(p));
-  ((d.resumen && d.resumen.paradas_suspendidas) || []).forEach(p => pts.push([p.lat, p.lon]));
-  (d.paradas_provisorias || []).forEach(p => pts.push([p.lat, p.lon]));
-  return pts;
-}
-
-function aplicarFiltro(ajustarMapa){
-  if(seleccionado && !visibles().some(d => d.id === seleccionado.id)) seleccionado = null;
-  pintarLista();
-  dibujarDesvios();
-  if(ajustarMapa && filtroActivo() && modo !== 'editor'){
-    const pts = [];
-    visibles().forEach(d => puntosDesvio(d).forEach(p => pts.push(p)));
-    if(pts.length) mapa.fitBounds(L.latLngBounds(pts), {padding:[40,40], maxZoom:17});
-  }
-}
-
 function pintarLista(){
   const cont = $('lista');
   cont.innerHTML = '';
-  pintarAtajosLineas();
-  const base = baseLista();
-  const lista = visibles();
-  const nAct = activos().length;
-  const textoAct = nAct + (nAct === 1 ? ' desvío activo' : ' desvíos activos');
-  if(!base.length){
+  const lista = esEditor ? desvios : activos();
+  if(!lista.length){
     cont.innerHTML = '<div class="vacio">No hay desvíos ' + (esEditor ? 'cargados' : 'activos en este momento') + '.</div>';
     $('resumenTop').textContent = esEditor ? 'Sin desvíos' : 'Sin desvíos activos';
     return;
   }
-  if(!lista.length){
-    cont.innerHTML = '<div class="vacio">Ningún desvío cumple todos los filtros<span id="vacioQ"></span>.<br>' +
-      'Probá sacar alguno, o buscar por línea, calle o código de parada.<br>' +
-      '<button class="chip primario" id="btnVerTodos">Quitar filtros</button></div>';
-    const dq = [].concat(Array.from(lineasSel).map(l => 'línea ' + l), filtro.trim() ? ['«' + filtro.trim() + '»'] : []);
-    $('vacioQ').textContent = dq.length ? ' (' + dq.join(' + ') + ')' : '';
-    $('btnVerTodos').onclick = limpiarFiltros;
-    $('resumenTop').textContent = '0 de ' + base.length + (base.length === 1 ? ' desvío' : ' desvíos');
-    return;
-  }
-  $('resumenTop').textContent = filtroActivo()
-    ? lista.length + ' de ' + base.length + (base.length === 1 ? ' desvío' : ' desvíos')
-    : textoAct;
+  $('resumenTop').textContent = activos().length + (activos().length === 1 ? ' desvío activo' : ' desvíos activos');
   for(const d of lista){
     const el = document.createElement('button');
-    el.className = 'card' + (seleccionado && seleccionado.id === d.id ? ' sel' : '') + ' e-' + d.estado;
+    el.className = 'card' + (seleccionado && seleccionado.id === d.id ? ' sel' : '') +
+      (marcados.has(d.id) ? ' marcada' : '') + ' e-' + d.estado;
     const susp = (d.paradas_suspendidas || []).length;
     const prov = (d.paradas_provisorias || []).length;
     el.innerHTML =
-      '<div class="ctop"><span class="lin"></span><span class="est"></span></div>' +
+      '<div class="ctop"><span class="cb"></span><span class="lin"></span><span class="est"></span></div>' +
       '<div class="tit"></div>' +
       '<div class="meta"></div>' +
       '<div class="pie"></div>';
@@ -505,16 +377,62 @@ function pintarLista(){
       (d.desde ? 'Desde ' + fechaCorta(d.desde) : '') +
       (d.hasta ? ' · hasta ' + fechaCorta(d.hasta) : '') +
       (d.actualizado_por ? '  |  ' + d.actualizado_por.split('@')[0] + ' · ' + hace(d.actualizado_en) : '');
-    el.onclick = ()=> seleccionar(d);
+    el.onclick = ()=> modoSel ? alternarMarca(d.id) : seleccionar(d);
     cont.appendChild(el);
   }
+}
+
+/* ---- selección múltiple, para borrar varios desvíos juntos ---- */
+function entrarModoSel(){
+  if(!esEditor) return;
+  modoSel = true;
+  marcados.clear();
+  document.body.classList.add('modoSel');
+  $('btnSeleccionar').textContent = 'Cancelar';
+  actualizarBarraSel();
+  pintarLista();
+}
+
+function salirModoSel(){
+  modoSel = false;
+  marcados.clear();
+  document.body.classList.remove('modoSel');
+  $('btnSeleccionar').textContent = 'Seleccionar';
+  pintarLista();
+}
+
+function alternarMarca(id){
+  if(marcados.has(id)) marcados.delete(id); else marcados.add(id);
+  actualizarBarraSel();
+  pintarLista();
+}
+
+function actualizarBarraSel(){
+  const n = marcados.size;
+  $('nSelCont').textContent = n + (n === 1 ? ' seleccionado' : ' seleccionados');
+  $('btnBorrarSel').disabled = !n;
+}
+
+async function borrarSeleccionados(){
+  const ids = Array.from(marcados);
+  if(!ids.length) return;
+  if(!confirm('¿Eliminar ' + ids.length + ' desvío' + (ids.length===1?'':'s') +
+    ' definitivamente? Esta acción no se puede deshacer.')) return;
+  const { error } = await sb.from('desvios').delete().in('id', ids);
+  if(error){ aviso('No se pudo eliminar: ' + error.message, 'err'); return; }
+  aviso(ids.length + ' desvío' + (ids.length===1?'':'s') + ' eliminado' + (ids.length===1?'':'s'), 'ok');
+  salirModoSel();
+  await cargarDesvios();
 }
 
 function seleccionar(d){
   seleccionado = d;
   pintarLista();
   dibujarDesvios();
-  const pts = puntosDesvio(d);
+  const pts = [];
+  (d.recorrido || []).forEach(p => pts.push(p));
+  ((d.resumen && d.resumen.paradas_suspendidas) || []).forEach(p => pts.push([p.lat, p.lon]));
+  (d.paradas_provisorias || []).forEach(p => pts.push([p.lat, p.lon]));
   if(pts.length) mapa.fitBounds(L.latLngBounds(pts), {padding:[40,40]});
   if(window.innerWidth <= 820) $('map').scrollIntoView({behavior:'smooth', block:'nearest'});
 }
@@ -522,7 +440,7 @@ function seleccionar(d){
 function dibujarDesvios(){
   capaDesvios.clearLayers();
   if(modo === 'editor') return;   // editando: el mapa muestra solo la propuesta en curso
-  const lista = visibles().filter(d => !seleccionado || d.id === seleccionado.id || d.estado === 'activo');
+  const lista = (esEditor ? desvios : activos()).filter(d => !seleccionado || d.id === seleccionado.id || d.estado === 'activo');
   for(const d of lista){
     const foco = seleccionado && seleccionado.id === d.id;
     const op = (!seleccionado || foco) ? 1 : .35;
@@ -981,6 +899,7 @@ async function verificarEditor(){
 
 async function salir(){
   await sb.auth.signOut();
+  if(modoSel) salirModoSel();
   sesion = null; esEditor = false; ed = null;
   document.body.classList.remove('editor');
   document.body.classList.remove('conSesion');
@@ -1772,6 +1691,7 @@ async function editarDesvio(d){
 }
 
 function abrirEditor(){
+  if(modoSel) salirModoSel();
   modo = 'editor';
   document.body.classList.add('editando');
   $('panelEditor').classList.add('on');
@@ -2244,10 +2164,6 @@ async function iniciar(){
   $('pass').addEventListener('keydown', e => { if(e.key === 'Enter') entrar(); });
   $('btnSalir').onclick = salir;
   $('btnActualizar').onclick = cargarDesvios;
-  $('busq').addEventListener('input', e => { filtro = e.target.value; actualizarBotonLimpiar(); aplicarFiltro(false); });
-  $('busq').addEventListener('change', () => aplicarFiltro(true));
-  $('busq').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); aplicarFiltro(true); e.target.blur(); } });
-  $('busqLimpiar').onclick = () => { limpiarFiltros(); $('busq').focus(); };
   $('btnNuevo').onclick = nuevoDesvio;
   $('btnCerrarEditor').onclick = cerrarEditor;
   $('calle').addEventListener('input', e => { asegurarCalles(); buscarPorCalle(e.target.value); });
@@ -2266,7 +2182,9 @@ async function iniciar(){
   $('btnPublicar').onclick = ()=> guardar('activo');
   $('btnFinalizar').onclick = ()=> guardar('finalizado');
   $('btnEliminar').onclick = eliminar;
-  $('lista').addEventListener('dblclick', ()=>{ if(esEditor && seleccionado) editarDesvio(seleccionado); });
+  $('lista').addEventListener('dblclick', ()=>{ if(esEditor && !modoSel && seleccionado) editarDesvio(seleccionado); });
+  $('btnSeleccionar').onclick = ()=> modoSel ? salirModoSel() : entrarModoSel();
+  $('btnBorrarSel').onclick = borrarSeleccionados;
   $('btnEditarSel').onclick = ()=>{ if(seleccionado) editarDesvio(seleccionado); };
   $('btnPDF').onclick = ()=>{
     if(!seleccionado){ aviso('Elegí primero un desvío de la lista', 'err'); return; }

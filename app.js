@@ -313,19 +313,12 @@ function iniciarMapa(){
 }
 
 /* ================= VISOR ================= */
+// Ver los desvíos activos no requiere cuenta (así cualquiera en la oficina,
+// o en la calle, puede consultarlos con el link). Cargar, editar o borrar
+// sigue necesitando ingresar con la cuenta de UPTU (lo controla esEditor,
+// más los permisos del lado de la base de datos).
 async function cargarDesvios(){
   if(!sb) return;
-  if(!sesion){
-    desvios = [];
-    $('lista').innerHTML = '<div class="vacio">Para ver los desvíos hay que ingresar con la cuenta de UPTU.<br><br>' +
-      '<button class="chip primario" id="btnIngresar2">Ingresar</button></div>';
-    const b = document.getElementById('btnIngresar2');
-    if(b) b.onclick = abrirLogin;
-    $('resumenTop').textContent = 'Acceso restringido';
-    $('sello').textContent = '';
-    capaDesvios.clearLayers();
-    return;
-  }
   try{
     let q = sb.from('desvios').select('*').order('actualizado_en', {ascending:false});
     if(!esEditor) q = q.eq('estado','activo');
@@ -2199,9 +2192,9 @@ async function iniciar(){
     document.body.classList.add('conSesion');
     await verificarEditor();
     if(!esEditor) $('quien').textContent = sesion.user.email.split('@')[0];
-  }else{
-    abrirLogin();
   }
+  // Sin sesión: no se fuerza el login. Queda como invitado, viendo los
+  // desvíos activos; puede entrar cuando quiera con el botón "Ingresar".
   await cargarDesvios();
   setInterval(cargarDesvios, REFRESCO_MS);
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) cargarDesvios(); });

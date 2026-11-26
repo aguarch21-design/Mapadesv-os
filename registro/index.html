@@ -34,12 +34,13 @@
   nav button.activo{color:var(--navy);border-bottom-color:var(--gold)}
   main{max-width:1200px;margin:0 auto;padding:18px 22px 40px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
-  .alertas{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:18px}
+  .alertas{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:18px}
   .alerta{border-left:5px solid;padding:12px 14px}
   .alerta h3{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.4px}
   .alerta.rojo{border-color:var(--rojo)} .alerta.rojo h3{color:var(--rojo)}
   .alerta.ambar{border-color:var(--ambar)} .alerta.ambar h3{color:var(--ambar)}
   .alerta.violeta{border-color:var(--violeta)} .alerta.violeta h3{color:var(--violeta)}
+  .alerta.azul{border-color:var(--navy)} .alerta.azul h3{color:var(--navy)}
   .alerta .item{padding:7px 0;border-top:1px dashed var(--line);display:flex;gap:8px;align-items:flex-start;justify-content:space-between}
   .alerta .item:first-of-type{border-top:none}
   .alerta .vacio{color:var(--muted);font-size:13px}
@@ -158,7 +159,7 @@
           <option value="vigente">Vigentes</option>
           <option value="programado">Programados</option>
           <option value="finalizado">Finalizados</option>
-          <option value="pendiente">Paradas sin levantar</option>
+          <option value="pendiente">Finalizados con paradas sin levantar</option>
         </select>
       </label>
       <button class="btn-sec" id="f-limpiar">Limpiar</button>
@@ -559,13 +560,15 @@ function renderAlertas(){
   const finHoy  = S.desvios.filter(d => d.fecha_fin === hoy);
   const finProx = S.desvios.filter(d => d.fecha_fin && d.fecha_fin > hoy && d.fecha_fin <= prox);
   const pend    = S.desvios.filter(d => estadoDe(d, hoy) === 'pendiente' && d.fecha_fin >= sumarDias(hoy, -60));
+  const suspHoy = S.desvios.filter(d => activoEn(d, hoy) && (d.paradas_suspendidas||[]).length)
+                           .sort((a,b) => (a.fecha_fin||'9999') < (b.fecha_fin||'9999') ? -1 : 1);
   const caja = (cls, titulo, lista, boton) => `
     <div class="card alerta ${cls}"><h3>${titulo} (${lista.length})</h3>
       ${lista.length ? lista.map(d => `
         <div class="item">
           <div class="txt" data-ver="${d.id}">${chips(d.lineas)}<br><b>${esc(d.titulo)}</b>
             ${d.paradas_suspendidas?.length ? `<div class="peq muted">Paradas: ${esc(d.paradas_suspendidas.join(', '))}</div>` : ''}
-            ${cls!=='rojo' ? `<div class="peq muted">Fin: ${fmt(d.fecha_fin)}</div>` : ''}
+            ${cls==='azul' ? `<div class="peq muted">Hasta: ${d.fecha_fin ? fmt(d.fecha_fin) : 'nuevo aviso'}</div>` : cls!=='rojo' ? `<div class="peq muted">Fin: ${fmt(d.fecha_fin)}</div>` : ''}
           </div>
           ${boton && S.user && d.paradas_suspendidas?.length && !d.paradas_levantadas ? `<button class="btn-sec btn-chico" data-levantar="${d.id}">Paradas levantadas</button>` : ''}
         </div>`).join('') : '<div class="vacio">Nada por ahora.</div>'}
@@ -573,7 +576,8 @@ function renderAlertas(){
   $('alertas').innerHTML =
     caja('rojo', 'Finalizan hoy', finHoy, true) +
     caja('ambar', `Finalizan el ${fmt(prox).slice(0,5)}`, finProx, false) +
-    caja('violeta', 'Paradas pendientes de levantar', pend, true);
+    caja('violeta', 'Desvíos finalizados con paradas sin levantar', pend, true) +
+    caja('azul', 'Paradas suspendidas hoy', suspHoy, false);
 }
 
 /* ===================== Calendario ===================== */

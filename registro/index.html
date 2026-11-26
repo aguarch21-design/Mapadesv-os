@@ -76,6 +76,8 @@
   th{text-align:left;font-size:12px;color:var(--muted);font-weight:600;padding:8px;border-bottom:2px solid var(--line);background:#f8fafc}
   td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
   tr.fila:hover td{background:#fafcff;cursor:pointer}
+  tr.fila.en-fecha td{background:#fff7e6}
+  tr.fila.en-fecha td:first-child{box-shadow:inset 4px 0 0 var(--gold)}
   .resultado-reclamo{margin-bottom:14px;padding:12px 14px;border-radius:8px;font-size:14px}
   .resultado-reclamo.si{background:#fff7e6;border:1px solid #f5c66b}
   .resultado-reclamo.no{background:#f0fdf4;border:1px solid #bbf7d0}
@@ -695,23 +697,26 @@ function renderListado(){
   const hoy = hoyISO();
   const lista = S.desvios.filter(d => {
     if(fl && !(d.lineas||[]).some(l => normLinea(l) === fl)) return false;
-    if(ff && !activoEn(d, ff)) return false;
+    if(ff && !fl && !activoEn(d, ff)) return false;   // con línea escrita se ven todos sus desvíos
     if(ft && !(`${d.titulo} ${d.observaciones||''} ${(d.paradas_suspendidas||[]).join(' ')}`.toLowerCase().includes(ft))) return false;
     if(fe && estadoDe(d, hoy) !== fe) return false;
     return true;
   });
 
+  if(ff && fl) lista.sort((a,b) => (activoEn(b, ff) ? 1 : 0) - (activoEn(a, ff) ? 1 : 0));   // primero los de esa fecha
+  const enFecha = (d) => ff && fl && activoEn(d, ff);
   const r = $('resultado-reclamo');
   if(ff && fl){
-    r.innerHTML = lista.length
-      ? `<div class="resultado-reclamo si"><b>Sí:</b> el ${fmt(ff)} la línea <b>${esc($('f-linea').value.trim())}</b> estaba desviando (${lista.length} desvío${lista.length>1?'s':''} abajo).</div>`
-      : `<div class="resultado-reclamo no"><b>No</b> hay desvíos registrados para la línea <b>${esc($('f-linea').value.trim())}</b> el ${fmt(ff)}.</div>`;
+    const n = lista.filter(enFecha).length, otros = lista.length - n;
+    r.innerHTML = n
+      ? `<div class="resultado-reclamo si"><b>Sí:</b> el ${fmt(ff)} la línea <b>${esc($('f-linea').value.trim())}</b> estaba desviando (${n} desvío${n>1?'s':''}, resaltado${n>1?'s':''} abajo).${otros ? ` <span class="muted peq">Abajo también ves ${otros} desvío${otros>1?'s':''} de otras fechas de esa línea.</span>` : ''}</div>`
+      : `<div class="resultado-reclamo no"><b>No</b> hay desvíos registrados para la línea <b>${esc($('f-linea').value.trim())}</b> el ${fmt(ff)}.${otros ? ` <span class="muted peq">Abajo ves los ${otros} desvío${otros>1?'s':''} de esa línea en otras fechas.</span>` : ''}</div>`;
   } else if(ff){
     r.innerHTML = `<div class="resultado-reclamo ${lista.length?'si':'no'}">${lista.length ? `El ${fmt(ff)} había <b>${lista.length}</b> desvío(s) activos.` : `No hay desvíos registrados el ${fmt(ff)}.`}</div>`;
   } else r.innerHTML = '';
 
   $('tabla').innerHTML = lista.map(d => `
-    <tr class="fila" data-ver="${d.id}">
+    <tr class="fila ${enFecha(d) ? 'en-fecha' : ''}" data-ver="${d.id}">
       <td>${chips(d.lineas)}</td>
       <td><b>${esc(d.titulo)}</b>${d.pdf_path ? ' <span class="muted peq">· PDF</span>' : ''}</td>
       <td>${fmt(d.fecha_inicio)}</td>

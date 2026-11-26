@@ -270,7 +270,8 @@ function buscarFechas(texto, anioBase){
 }
 
 function clasificarFecha(texto, idx){
-  const ctx = texto.slice(Math.max(0, idx-45), idx).toLowerCase();
+  let ctx = texto.slice(Math.max(0, idx-45), idx).toLowerCase();
+  ctx = ctx.slice(ctx.lastIndexOf('\n') + 1);   // solo el renglón de la fecha
   if(/montevideo,?\s*$/.test(ctx) || /fecha\s*(de\s*emisi[oó]n)?\s*:?\s*$/.test(ctx)) return 'ignorar';
   const ultimo = (re) => { let p=-1, mm; re.lastIndex=0; while((mm=re.exec(ctx))) p = mm.index; return p; };
   const pFin = ultimo(/(hasta|finaliza|finalizar[aá]|culmina|termina|retoma|vuelve|regresa|\bal\b|\by el\b)/g);
@@ -285,6 +286,9 @@ function esCodigoLinea(tok){
 
 function buscarLineas(texto){
   const set = new Set();
+  for(const m of texto.matchAll(/^\s*((?:[A-Z]{0,3}\d{1,3}[A-Z]?\s*,\s*){2,}[A-Z]{0,3}\d{1,3}[A-Z]?)\b/gm)){
+    m[1].split(/\s*,\s*/).forEach(t => esCodigoLinea(t) && set.add(t));
+  }
   const re = /l[ií]neas?\s*(?:n[º°o]\.?\s*)?[:\-–]?\s*([^\n]{1,160})/gi;
   let m;
   while((m = re.exec(texto))){
@@ -332,6 +336,8 @@ function buscarParadas(lineas){
 }
 
 function buscarTitulo(lineas){
+  const iDes = lineas.findIndex(l => /^\s*desv[ií]o\s*$/i.test(l));
+  if(iDes >= 0 && lineas[iDes+1] && lineas[iDes+1].trim().length >= 8 && !RE_ETIQUETA.test(lineas[iDes+1].trim())) return lineas[iDes+1].trim();
   const conDesvio = lineas.find(l => /desv[ií]o/i.test(l) && l.trim().length >= 8 && l.trim().length <= 160);
   if(conDesvio) return conDesvio.trim();
   const primera = lineas.find(l => l.trim().length >= 10 && !/^(montevideo|intendencia|divisi[oó]n|unidad)/i.test(l.trim()));
@@ -367,7 +373,7 @@ function separarEsquinas(s){
 
 /* Lee comunicados armados como tabla de dos columnas (etiqueta | dato).
    Recibe las piezas de texto con su posición y devuelve [{etiqueta, valor}] o null. */
-const RE_ETIQUETA = /^(calle principal|calle|principal|entre|fecha|hora|horario|motivo|l[ií]neas?\b|paradas? suspendidas?|paradas? suprimidas?|paradas? provisorias?|provisorias?|modificado|observaciones?|recorrido)/i;
+const RE_ETIQUETA = /^(calle principal|calle|principal|v[ií]as? principal(es)?|entre|fecha|hora|horario|motivo|l[ií]neas?\b|paradas? suspendidas?|paradas? suprimidas?|paradas? provisorias?|provisorias?|modificado|observaciones?|recorrido)/i;
 function camposDeTabla(paginas){
   const campos = [];
   for(const items of paginas){
@@ -426,10 +432,25 @@ function camposDeTabla(paginas){
 }
 
 function analizarComunicado(texto, anioBase, campos){
-  if(campos) return analizarCampos(campos, texto, anioBase);
+  const p = analizarPlano(texto, anioBase);
+  if(!campos) return p;
+  const t = analizarCampos(campos, texto, anioBase);
+  // Lo que la tabla no trae se completa con lo leído en el texto completo
+  return {
+    titulo: t.tieneTitulo ? t.titulo : p.titulo,
+    lineas: [...new Set([...t.lineas, ...p.lineas])],
+    inicio: t.inicio || p.inicio,
+    fin: t.inicio ? t.fin : p.fin,
+    sinFin: t.inicio ? t.sinFin : p.sinFin,
+    paradas: t.tieneParadas ? t.paradas : p.paradas,
+    detalleParadas: t.detalleParadas || p.detalleParadas
+  };
+}
+
+function analizarPlano(texto, anioBase){
   const lineas = texto.split('\n').map(l=>l.replace(/\s+/g,' ').trim()).filter(Boolean);
   const plano = lineas.join('\n');
-  const fechas = buscarFechas(plano, anioBase);
+  const fechas = fechasDe(plano, anioBase);
   let inicio=null, fin=null; const libres=[];
   for(const f of fechas){
     const c = clasificarFecha(plano, f.idx);
@@ -445,7 +466,9 @@ function analizarComunicado(texto, anioBase, campos){
   }
   // Desvío de un solo día ("el día 28/11 de 18 a 23 h")
   const validas = fechas.filter(f => clasificarFecha(plano, f.idx) !== 'ignorar');
-  if(inicio && !fin && validas.length === 1 && /\bel d[ií]a\s*$/i.test(plano.slice(Math.max(0, validas[0].idx-12), validas[0].idx))) fin = inicio;
+  const sinFin0 = /hasta\s+nuevo\s+aviso|por\s+tiempo\s+indeterminado|sin\s+fecha\s+de\s+finalizaci/i.test(plano);
+  if(inicio && !fin && !sinFin0 && validas.length === 1 &&
+     !/(a\s+partir|desde)\s+(del?|el)?\s*(d[ií]a\s*)?((lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s*)?$/i.test(plano.slice(Math.max(0, validas[0].idx-30), validas[0].idx))) fin = inicio;
   if(inicio && fin && fin < inicio){ const t=inicio; inicio=fin; fin=t; }
   const sinFin = /hasta\s+nuevo\s+aviso|por\s+tiempo\s+indeterminado|sin\s+fecha\s+de\s+finalizaci/i.test(plano);
   const par = buscarParadas(lineas);
@@ -511,17 +534,18 @@ function analizarCampos(campos, texto, anioBase){
   }
   if(inicio && !fin && fechasDe(textoFecha, anioBase).length === 1 && !/a partir|desde/i.test(textoFecha)) fin = inicio;
   const sinFin = /hasta\s+nuevo\s+aviso|indeterminad|sin\s+fecha/i.test(textoFecha);
-  const calle = val(/^(calle|principal)/i), entre = val(/^entre/i), motivo = val(/^motivo/i);
+  const calle = val(/^(calle|principal|v[ií]as? principal)/i), entre = val(/^entre/i), motivo = val(/^motivo/i);
   let titulo = calle ? calle + (entre ? ` (${entre})` : '') : '';
   if(motivo) titulo = titulo ? `${titulo} – ${motivo}` : motivo;
   const obs = [];
   const hora = val(/^(hora|horario)/i); if(hora) obs.push('Hora: ' + hora);
   bloquesLineas.forEach(c => c.valor && obs.push(c.etiqueta + ': ' + c.valor));
   const prov = val(/^(paradas? )?provisori/i); if(prov) obs.push('Paradas provisorias: ' + prov);
-  campos.filter(c => c.valor && !/^(calle|principal|entre|fecha|hora|horario|motivo|l[ií]neas?\b|paradas?|provisori|observaci|modificado)/i.test(c.etiqueta))
+  campos.filter(c => c.valor && !/^(calle|principal|v[ií]as? principal|entre|fecha|hora|horario|motivo|l[ií]neas?\b|paradas?|provisori|observaci|modificado)/i.test(c.etiqueta))
         .forEach(c => obs.push(c.etiqueta + ': ' + c.valor));
   const nota = val(/^observaci/i); if(nota) obs.push('Observaciones: ' + nota);
   return {
+    tieneTitulo: !!titulo, tieneParadas: campos.some(c => /^paradas? (suspendid|suprimid)/i.test(c.etiqueta)),
     titulo: titulo || buscarTitulo(texto.split('\n')),
     lineas, inicio, fin: sinFin ? null : fin, sinFin,
     paradas: paradasDeValor(val(/^paradas? (suspendid|suprimid)/i)),

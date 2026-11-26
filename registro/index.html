@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registro de Desvíos · UPTU</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --navy:#003580; --navy-2:#0a4aa8; --gold:#f5a800; --bg:#f4f6fa; --card:#fff;
+    --text:#1f2937; --muted:#6b7280; --line:#e5e7eb;
+    --rojo:#b91c1c; --ambar:#b45309; --violeta:#6b21a8; --verde:#15803d;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+  header{background:var(--navy);color:#fff;border-bottom:4px solid var(--gold);padding:12px 22px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header h1{font-size:18px;margin:0;font-weight:600;letter-spacing:.2px}
+  header .sub{font-size:12px;opacity:.8}
+  header .esp{flex:1}
+  .usuario{font-size:12px;opacity:.9}
+  button{font:inherit;cursor:pointer;border-radius:6px;border:1px solid transparent;padding:7px 13px}
+  .btn{background:var(--navy);color:#fff}
+  .btn:hover{background:var(--navy-2)}
+  .btn-gold{background:var(--gold);color:#1f2937;font-weight:600}
+  .btn-sec{background:#fff;color:var(--navy);border-color:#c7d2e5}
+  .btn-sec:hover{background:#eef3fb}
+  .btn-peligro{background:#fff;color:var(--rojo);border-color:#f3c4c4}
+  .btn-chico{padding:4px 9px;font-size:12px}
+  header .btn-sec{background:transparent;color:#fff;border-color:rgba(255,255,255,.5)}
+  header .btn-sec:hover{background:rgba(255,255,255,.1)}
+  nav{display:flex;gap:4px;padding:0 22px;background:#fff;border-bottom:1px solid var(--line)}
+  nav button{background:none;border:none;border-bottom:3px solid transparent;border-radius:0;padding:12px 14px;color:var(--muted);font-weight:500}
+  nav button.activo{color:var(--navy);border-bottom-color:var(--gold)}
+  main{max-width:1200px;margin:0 auto;padding:18px 22px 40px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .alertas{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:18px}
+  .alerta{border-left:5px solid;padding:12px 14px}
+  .alerta h3{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.4px}
+  .alerta.rojo{border-color:var(--rojo)} .alerta.rojo h3{color:var(--rojo)}
+  .alerta.ambar{border-color:var(--ambar)} .alerta.ambar h3{color:var(--ambar)}
+  .alerta.violeta{border-color:var(--violeta)} .alerta.violeta h3{color:var(--violeta)}
+  .alerta .item{padding:7px 0;border-top:1px dashed var(--line);display:flex;gap:8px;align-items:flex-start;justify-content:space-between}
+  .alerta .item:first-of-type{border-top:none}
+  .alerta .vacio{color:var(--muted);font-size:13px}
+  .item .txt{cursor:pointer}
+  .item .txt:hover b{text-decoration:underline}
+  .chip{display:inline-block;background:#e8eef9;color:var(--navy);border-radius:4px;padding:1px 6px;font-size:12px;font-weight:600;margin:1px 2px 1px 0}
+  .muted{color:var(--muted)}
+  .peq{font-size:12px}
+  .badge{display:inline-block;font-size:11px;font-weight:600;border-radius:10px;padding:2px 8px}
+  .b-vigente{background:#dcfce7;color:#166534}
+  .b-programado{background:#e0e7ff;color:#3730a3}
+  .b-finalizado{background:#f3f4f6;color:#4b5563}
+  .b-pendiente{background:#f3e8ff;color:#6b21a8}
+  /* Calendario */
+  .cal-top{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .cal-top h2{margin:0;font-size:17px;min-width:190px;text-transform:capitalize;color:var(--navy)}
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);border-top:1px solid var(--line);border-left:1px solid var(--line)}
+  .cal .dow{background:#f8fafc;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;padding:6px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .cal .dia{min-height:104px;padding:4px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:#fff;cursor:pointer;overflow:hidden}
+  .cal .dia:hover{background:#fafcff}
+  .cal .dia.fuera{background:#fafafa;color:#bbb}
+  .cal .dia.hoy .num{background:var(--gold);color:#1f2937;border-radius:10px;padding:0 6px}
+  .cal .num{font-size:12px;font-weight:600;display:inline-block;margin-bottom:3px}
+  .ev{font-size:11px;color:#fff;border-radius:3px;padding:1px 5px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ev.fin{outline:2px solid var(--rojo);outline-offset:-2px}
+  .mas{font-size:11px;color:var(--muted)}
+  /* Listado */
+  .filtros{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+  .filtros label{display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:3px}
+  input,select,textarea{font:inherit;border:1px solid #cbd5e1;border-radius:6px;padding:7px 9px;background:#fff;color:var(--text)}
+  input:focus,select:focus,textarea:focus{outline:2px solid #bcd0f0;border-color:var(--navy)}
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:12px;color:var(--muted);font-weight:600;padding:8px;border-bottom:2px solid var(--line);background:#f8fafc}
+  td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  tr.fila:hover td{background:#fafcff;cursor:pointer}
+  .resultado-reclamo{margin-bottom:14px;padding:12px 14px;border-radius:8px;font-size:14px}
+  .resultado-reclamo.si{background:#fff7e6;border:1px solid #f5c66b}
+  .resultado-reclamo.no{background:#f0fdf4;border:1px solid #bbf7d0}
+  /* Formulario */
+  .drop{border:2px dashed #a9bbdb;border-radius:10px;padding:26px;text-align:center;background:#f8fbff;cursor:pointer;margin-bottom:16px}
+  .drop.sobre{background:#eaf1fc;border-color:var(--navy)}
+  .drop b{color:var(--navy)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px}
+  .campo{display:flex;flex-direction:column;gap:4px}
+  .campo.full{grid-column:1/-1}
+  .campo label{font-size:12px;font-weight:600;color:#374151}
+  .campo .ayuda{font-size:11px;color:var(--muted)}
+  .acciones{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+  .aviso-lectura{background:#eef6ff;border:1px solid #c7dcf7;color:#1e3a8a;border-radius:8px;padding:9px 12px;font-size:13px;margin-bottom:14px}
+  /* Modal */
+  .modal-fondo{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
+  .modal-fondo.abierto{display:flex}
+  .modal{background:#fff;border-radius:12px;max-width:620px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+  .modal .cab{background:var(--navy);color:#fff;padding:14px 18px;border-bottom:3px solid var(--gold);display:flex;justify-content:space-between;align-items:center;gap:10px;border-radius:12px 12px 0 0}
+  .modal .cab h3{margin:0;font-size:16px}
+  .modal .cab button{background:none;color:#fff;font-size:20px;padding:0 4px}
+  .modal .cuerpo{padding:16px 18px}
+  .modal dl{display:grid;grid-template-columns:150px 1fr;gap:8px 12px;margin:0}
+  .modal dt{font-size:12px;color:var(--muted);font-weight:600}
+  .modal dd{margin:0}
+  .modal .pie{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;z-index:60;display:none}
+  .oculto{display:none!important}
+  @media (max-width:720px){
+    .grid2{grid-template-columns:1fr}
+    .cal .dia{min-height:70px}
+    .ev{font-size:10px}
+    .modal dl{grid-template-columns:1fr}
+    .col-movil-ocultar{display:none}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Registro de Desvíos</h1>
+    <div class="sub">UPTU · División Transporte · Intendencia de Montevideo</div>
+  </div>
+  <div class="esp"></div>
+  <span class="usuario" id="usuario"></span>
+  <button class="btn-sec" id="btn-ics" title="Descargar todos los desvíos para importarlos en un calendario">Exportar a calendario (.ics)</button>
+  <button class="btn-sec" id="btn-login">Ingresar</button>
+</header>
+
+<nav>
+  <button data-tab="calendario" class="activo">Calendario</button>
+  <button data-tab="listado">Buscar / Reclamos</button>
+  <button data-tab="cargar">Cargar comunicado</button>
+</nav>
+
+<main>
+  <section class="alertas" id="alertas"></section>
+
+  <!-- CALENDARIO -->
+  <section id="tab-calendario" class="card">
+    <div class="cal-top">
+      <button class="btn-sec btn-chico" id="mes-ant">‹</button>
+      <h2 id="mes-titulo"></h2>
+      <button class="btn-sec btn-chico" id="mes-sig">›</button>
+      <button class="btn-sec btn-chico" id="mes-hoy">Hoy</button>
+      <span class="muted peq" style="margin-left:auto">Clic en un día para ver qué líneas estaban desviando. Borde rojo = último día del desvío.</span>
+    </div>
+    <div class="cal" id="cal"></div>
+  </section>
+
+  <!-- LISTADO / RECLAMOS -->
+  <section id="tab-listado" class="card oculto">
+    <div class="filtros">
+      <label>Línea<input id="f-linea" placeholder="Ej. 121" style="width:110px"></label>
+      <label>Fecha del reclamo<input type="date" id="f-fecha"></label>
+      <label>Texto<input id="f-texto" placeholder="Calle, motivo…" style="width:200px"></label>
+      <label>Estado
+        <select id="f-estado">
+          <option value="">Todos</option>
+          <option value="vigente">Vigentes</option>
+          <option value="programado">Programados</option>
+          <option value="finalizado">Finalizados</option>
+          <option value="pendiente">Paradas sin levantar</option>
+        </select>
+      </label>
+      <button class="btn-sec" id="f-limpiar">Limpiar</button>
+    </div>
+    <div id="resultado-reclamo"></div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Líneas</th><th>Desvío</th><th>Desde</th><th>Hasta</th>
+          <th class="col-movil-ocultar">Paradas suspendidas</th><th>Estado</th>
+        </tr></thead>
+        <tbody id="tabla"></tbody>
+      </table>
+    </div>
+    <p class="muted peq" id="conteo"></p>
+  </section>
+
+  <!-- CARGAR -->
+  <section id="tab-cargar" class="card oculto">
+    <div class="aviso-lectura oculto" id="aviso-login">Para cargar o editar desvíos tenés que <a href="#" id="link-login">ingresar</a> con tu usuario @imm.gub.uy. Para consultar no hace falta.</div>
+    <div id="form-wrap">
+      <h2 style="margin:0 0 12px;font-size:17px;color:var(--navy)" id="form-titulo">Nuevo desvío</h2>
+      <div class="drop" id="drop">
+        <input type="file" id="archivo" accept="application/pdf" class="oculto">
+        <div id="drop-txt"><b>Arrastrá el PDF del comunicado acá</b> o hacé clic para elegirlo.<br>
+          <span class="muted peq">Se leen solos las líneas, las fechas y las paradas suspendidas. Revisá los datos antes de guardar.</span></div>
+      </div>
+      <div class="grid2">
+        <div class="campo full"><label>Título / motivo</label><input id="c-titulo" placeholder="Ej. Obras en 18 de Julio entre Ejido y Yaguarón"></div>
+        <div class="campo full"><label>Líneas afectadas</label><input id="c-lineas" placeholder="Ej. 121, 181, D10">
+          <span class="ayuda">Separadas por coma.</span></div>
+        <div class="campo"><label>Fecha de inicio</label><input type="date" id="c-inicio"></div>
+        <div class="campo"><label>Fecha de fin</label><input type="date" id="c-fin">
+          <label style="font-weight:400;display:flex;gap:6px;align-items:center"><input type="checkbox" id="c-sinfin"> Sin fecha de fin (hasta nuevo aviso)</label></div>
+        <div class="campo full"><label>Paradas suspendidas</label><input id="c-paradas" placeholder="Ej. 2345, 2346, 2350">
+          <span class="ayuda">Números de parada separados por coma. Son las que hay que levantar cuando finalice el desvío.</span></div>
+        <div class="campo full"><label>Observaciones</label><textarea id="c-obs" rows="4" placeholder="Recorrido alternativo, paradas provisorias, detalle de paradas…"></textarea></div>
+      </div>
+      <div class="acciones">
+        <button class="btn-sec" id="c-cancelar">Cancelar</button>
+        <button class="btn-gold" id="c-guardar">Guardar desvío</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- Modal detalle -->
+<div class="modal-fondo" id="m-detalle"><div class="modal">
+  <div class="cab"><h3 id="d-titulo"></h3><button data-cerrar>×</button></div>
+  <div class="cuerpo"><dl id="d-dl"></dl></div>
+  <div class="pie" id="d-pie"></div>
+</div></div>
+
+<!-- Modal login -->
+<div class="modal-fondo" id="m-login"><div class="modal" style="max-width:380px">
+  <div class="cab"><h3>Ingresar</h3><button data-cerrar>×</button></div>
+  <div class="cuerpo">
+    <div class="campo" style="margin-bottom:10px"><label>Correo</label><input id="l-email" type="email" placeholder="nombre@imm.gub.uy"></div>
+    <div class="campo"><label>Contraseña</label><input id="l-pass" type="password"></div>
+    <p class="muted peq" id="l-error" style="color:var(--rojo)"></p>
+  </div>
+  <div class="pie"><button class="btn" id="l-entrar">Ingresar</button></div>
+</div></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   CONFIGURACIÓN — completar con la "anon public key" del proyecto
+   (Supabase → Project Settings → API). Es la misma que usa Mapadesvíos.
+   ===================================================================== */
+const CONFIG = {
+  SUPABASE_URL: 'https://vxwjxygjdirzxykefzaw.supabase.co',
+  SUPABASE_ANON_KEY: 'PEGAR_ACA_LA_ANON_KEY',
+  TABLA: 'registro_desvios',
+  BUCKET: 'comunicados-desvios'
+};
+
+/* ===================== LECTOR DE COMUNICADOS (inicio) ===================== */
+const MESES = {enero:1,febrero:2,marzo:3,abril:4,mayo:5,junio:6,julio:7,agosto:8,setiembre:9,septiembre:9,octubre:10,noviembre:11,diciembre:12};
+
+function pad2(n){ return String(n).padStart(2,'0'); }
+
+function fechaValida(d,m,a){
+  if(m<1||m>12||d<1||d>31) return null;
+  const f = new Date(a, m-1, d);
+  if(f.getMonth()!==m-1) return null;
+  return `${a}-${pad2(m)}-${pad2(d)}`;
+}
+
+function buscarFechas(texto, anioBase){
+  const out = [];
+  const reNum = /\b(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{2,4}))?\b/g;
+  const reTxt = /\b(\d{1,2})(?:º|°)?\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|setiembre|septiembre|octubre|noviembre|diciembre)(?:\s+(?:de|del)\s+(\d{4}))?/gi;
+  let m;
+  while((m = reNum.exec(texto))){
+    let a = m[3] ? parseInt(m[3],10) : anioBase;
+    if(a < 100) a += 2000;
+    const iso = fechaValida(parseInt(m[1],10), parseInt(m[2],10), a);
+    if(iso) out.push({iso, idx:m.index});
+  }
+  while((m = reTxt.exec(texto))){
+    const a = m[3] ? parseInt(m[3],10) : anioBase;
+    const iso = fechaValida(parseInt(m[1],10), MESES[m[2].toLowerCase()], a);
+    if(iso) out.push({iso, idx:m.index});
+  }
+  return out.sort((x,y)=>x.idx-y.idx);
+}
+
+function clasificarFecha(texto, idx){
+  const ctx = texto.slice(Math.max(0, idx-45), idx).toLowerCase();
+  if(/montevideo,?\s*$/.test(ctx) || /fecha\s*(de\s*emisi[oó]n)?\s*:?\s*$/.test(ctx)) return 'ignorar';
+  const ultimo = (re) => { let p=-1, mm; re.lastIndex=0; while((mm=re.exec(ctx))) p = mm.index; return p; };
+  const pFin = ultimo(/(hasta|finaliza|finalizar[aá]|culmina|termina|retoma|vuelve|regresa|\bal\b|\by el\b)/g);
+  const pIni = ultimo(/(desde|a partir|inicia|comienza|comenzar[aá]|\bdel\b|\bel d[ií]a\b)/g);
+  if(pFin<0 && pIni<0) return null;
+  return pFin > pIni ? 'fin' : 'inicio';
+}
+
+function esCodigoLinea(tok){
+  return /^(?:[A-Z]{1,3}\d{1,3}[A-Z]?|\d{1,3}[A-Z]?|[A-Z])$/.test(tok) && !/^(?:Y|E|O|A)$/.test(tok);
+}
+
+function buscarLineas(texto){
+  const set = new Set();
+  const re = /l[ií]neas?\s*(?:n[º°o]\.?\s*)?[:\-–]?\s*([^\n]{1,160})/gi;
+  let m;
+  while((m = re.exec(texto))){
+    const toks = m[1].split(/[\s,;\/()]+/).filter(Boolean);
+    let tomadas = 0;
+    for(const t0 of toks){
+      const t = t0.replace(/[.:]+$/,'');
+      if(/^(y|e|las?|n[º°o]\.?|nros?\.?|números?)$/i.test(t)) continue;
+      if(esCodigoLinea(t)){ set.add(t); tomadas++; continue; }
+      if(/[a-záéíóúñ]/.test(t) && tomadas>0) break;   // terminó la lista
+      if(/[a-záéíóúñ]{3,}/.test(t) && tomadas===0) break;
+    }
+  }
+  return [...set];
+}
+
+function buscarParadas(lineas){
+  const codigos = new Set();
+  const detalle = [];
+  const reInicio = /(parada[s]?[^\n]{0,60}suspend|suspend[^\n]{0,60}parada|parada[s]?[^\n]{0,40}(sin servicio|no (se )?(atender|operativ|habilitad)))/i;
+  const reFin = /^(recorrido|ida\b|vuelta\b|paradas?\s+(provisori|habilitad|alternativ)|observaci|l[ií]neas?\b|desv[ií]o\b|se\s+recuerda|atentamente)/i;
+  for(let i=0;i<lineas.length;i++){
+    if(!reInicio.test(lineas[i])) continue;
+    const bloque = [lineas[i]];
+    for(let j=i+1;j<lineas.length && j<i+30;j++){
+      if(reFin.test(lineas[j].trim())) break;
+      bloque.push(lineas[j]);
+    }
+    for(const l of bloque){
+      detalle.push(l.trim());
+      let mm;
+      const reCod = /(?:parada|n[º°o]\.?|c[oó]d(?:igo)?\.?)\s*:?\s*(\d{3,5})\b/gi;
+      while((mm = reCod.exec(l))) codigos.add(mm[1]);
+      const ini = l.match(/^\s*(\d{3,5})\b/);
+      if(ini) codigos.add(ini[1]);
+      const lista = l.match(/(?:paradas?|n[º°o]s?\.?)\s*:?\s*((?:\d{3,5}\s*(?:,|y|e|-|\/)\s*)+\d{3,5})/i);
+      if(lista) lista[1].split(/\s*(?:,|y|e|-|\/)\s*/).forEach(c=>codigos.add(c));
+    }
+  }
+  return { codigos:[...codigos], detalle: detalle.filter(Boolean).join('\n') };
+}
+
+function buscarTitulo(lineas){
+  const conDesvio = lineas.find(l => /desv[ií]o/i.test(l) && l.trim().length >= 8 && l.trim().length <= 160);
+  if(conDesvio) return conDesvio.trim();
+  const primera = lineas.find(l => l.trim().length >= 10 && !/^(montevideo|intendencia|divisi[oó]n|unidad)/i.test(l.trim()));
+  return primera ? primera.trim() : '';
+}
+
+function analizarComunicado(texto, anioBase){
+  const lineas = texto.split('\n').map(l=>l.replace(/\s+/g,' ').trim()).filter(Boolean);
+  const plano = lineas.join('\n');
+  const fechas = buscarFechas(plano, anioBase);
+  let inicio=null, fin=null; const libres=[];
+  for(const f of fechas){
+    const c = clasificarFecha(plano, f.idx);
+    if(c==='ignorar') continue;
+    if(c==='inicio' && !inicio) inicio = f.iso;
+    else if(c==='fin' && !fin) fin = f.iso;
+    else if(c===null) libres.push(f.iso);
+  }
+  if(!inicio && libres.length) inicio = libres.shift();
+  if(!fin){
+    const posteriores = libres.filter(x => !inicio || x > inicio).sort();
+    if(posteriores.length) fin = posteriores[posteriores.length-1];
+  }
+  // Desvío de un solo día ("el día 28/11 de 18 a 23 h")
+  const validas = fechas.filter(f => clasificarFecha(plano, f.idx) !== 'ignorar');
+  if(inicio && !fin && validas.length === 1 && /\bel d[ií]a\s*$/i.test(plano.slice(Math.max(0, validas[0].idx-12), validas[0].idx))) fin = inicio;
+  if(inicio && fin && fin < inicio){ const t=inicio; inicio=fin; fin=t; }
+  const sinFin = /hasta\s+nuevo\s+aviso|por\s+tiempo\s+indeterminado|sin\s+fecha\s+de\s+finalizaci/i.test(plano);
+  const par = buscarParadas(lineas);
+  return {
+    titulo: buscarTitulo(lineas),
+    lineas: buscarLineas(plano),
+    inicio, fin: sinFin ? null : fin, sinFin,
+    paradas: par.codigos,
+    detalleParadas: par.detalle
+  };
+}
+/* ===================== LECTOR DE COMUNICADOS (fin) ===================== */
+
+if (window.pdfjsLib) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
+async function textoDePDF(file){
+  const pdf = await pdfjsLib.getDocument({data: await file.arrayBuffer()}).promise;
+  const salida = [];
+  for(let p=1;p<=pdf.numPages;p++){
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    const filas = [];
+    for(const it of tc.items){
+      if(!it.str || !it.str.trim()) continue;
+      const y = it.transform[5], x = it.transform[4];
+      let fila = filas.find(f => Math.abs(f.y - y) < 3);
+      if(!fila){ fila = {y, items:[]}; filas.push(fila); }
+      fila.items.push({x, s:it.str, w:it.width||0});
+    }
+    filas.sort((a,b)=>b.y-a.y);
+    for(const f of filas){
+      f.items.sort((a,b)=>a.x-b.x);
+      let linea='', finAnt=null;
+      for(const it of f.items){
+        if(finAnt!==null && it.x - finAnt > 1.5 && !linea.endsWith(' ')) linea += ' ';
+        linea += it.s; finAnt = it.x + it.w;
+      }
+      salida.push(linea);
+    }
+  }
+  return salida.join('\n');
+}
+
+/* ===================== Utilidades ===================== */
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const iso = (d) => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+const deISO = (s) => { const [a,m,d] = s.split('-').map(Number); return new Date(a, m-1, d); };
+const fmt = (s) => s ? s.split('-').reverse().join('/') : '—';
+const sumarDias = (s, n) => { const d = deISO(s); d.setDate(d.getDate()+n); return iso(d); };
+const hoyISO = () => iso(new Date());
+const normLinea = (s) => String(s).toUpperCase().replace(/\s+/g,'');
+const listaDeTexto = (s) => s.split(/[,;\n]+/).map(x=>x.trim()).filter(Boolean);
+const COLORES = ['#003580','#0b7a75','#7c3aed','#c2410c','#be123c','#15803d','#1d4ed8','#a16207','#0e7490','#9d174d'];
+const colorDe = (id) => { let h=0; for(const c of id) h = (h*31 + c.charCodeAt(0)) >>> 0; return COLORES[h % COLORES.length]; };
+function proxHabil(hoy){ const dow = deISO(hoy).getDay(); return sumarDias(hoy, dow===5?3 : dow===6?2 : 1); }
+function toast(msg, ms=2600){ const t=$('toast'); t.textContent=msg; t.style.display='block'; clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', ms); }
+
+function estadoDe(d, hoy=hoyISO()){
+  if(d.fecha_inicio > hoy) return 'programado';
+  if(!d.fecha_fin || d.fecha_fin >= hoy) return 'vigente';
+  if(!d.paradas_levantadas && (d.paradas_suspendidas||[]).length) return 'pendiente';
+  return 'finalizado';
+}
+const ETIQUETA = {vigente:'Vigente', programado:'Programado', finalizado:'Finalizado', pendiente:'Paradas sin levantar'};
+const badge = (e) => `<span class="badge b-${e}">${ETIQUETA[e]}</span>`;
+const chips = (arr) => (arr||[]).map(l=>`<span class="chip">${esc(l)}</span>`).join('');
+const activoEn = (d, dia) => d.fecha_inicio <= dia && (!d.fecha_fin || d.fecha_fin >= dia);
+const urlPDF = (d) => d.pdf_path ? sb.storage.from(CONFIG.BUCKET).getPublicUrl(d.pdf_path).data.publicUrl : null;
+
+/* ===================== Estado y datos ===================== */
+const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+const S = { desvios:[], user:null, mes:new Date(), editando:null, archivo:null };
+S.mes.setDate(1);
+
+async function cargar(){
+  const { data, error } = await sb.from(CONFIG.TABLA).select('*').order('fecha_inicio', {ascending:false});
+  if(error){ toast('No se pudieron cargar los desvíos: ' + error.message, 5000); return; }
+  S.desvios = data || [];
+  render();
+}
+
+function render(){ renderAlertas(); renderCalendario(); renderListado(); }
+
+/* ===================== Alertas ===================== */
+function renderAlertas(){
+  const hoy = hoyISO(), prox = proxHabil(hoy);
+  const finHoy  = S.desvios.filter(d => d.fecha_fin === hoy);
+  const finProx = S.desvios.filter(d => d.fecha_fin && d.fecha_fin > hoy && d.fecha_fin <= prox);
+  const pend    = S.desvios.filter(d => estadoDe(d, hoy) === 'pendiente' && d.fecha_fin >= sumarDias(hoy, -60));
+  const caja = (cls, titulo, lista, boton) => `
+    <div class="card alerta ${cls}"><h3>${titulo} (${lista.length})</h3>
+      ${lista.length ? lista.map(d => `
+        <div class="item">
+          <div class="txt" data-ver="${d.id}">${chips(d.lineas)}<br><b>${esc(d.titulo)}</b>
+            ${d.paradas_suspendidas?.length ? `<div class="peq muted">Paradas: ${esc(d.paradas_suspendidas.join(', '))}</div>` : ''}
+            ${cls!=='rojo' ? `<div class="peq muted">Fin: ${fmt(d.fecha_fin)}</div>` : ''}
+          </div>
+          ${boton && S.user && d.paradas_suspendidas?.length && !d.paradas_levantadas ? `<button class="btn-sec btn-chico" data-levantar="${d.id}">Paradas levantadas</button>` : ''}
+        </div>`).join('') : '<div class="vacio">Nada por ahora.</div>'}
+    </div>`;
+  $('alertas').innerHTML =
+    caja('rojo', 'Finalizan hoy', finHoy, true) +
+    caja('ambar', `Finalizan el ${fmt(prox).slice(0,5)}`, finProx, false) +
+    caja('violeta', 'Paradas pendientes de levantar', pend, true);
+}
+
+/* ===================== Calendario ===================== */
+function renderCalendario(){
+  const y = S.mes.getFullYear(), m = S.mes.getMonth();
+  $('mes-titulo').textContent = S.mes.toLocaleDateString('es-UY', {month:'long', year:'numeric'});
+  const primero = new Date(y, m, 1);
+  const offset = (primero.getDay() + 6) % 7;
+  const inicio = new Date(y, m, 1 - offset);
+  const hoy = hoyISO();
+  let html = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d=>`<div class="dow">${d}</div>`).join('');
+  for(let i=0;i<42;i++){
+    const f = new Date(inicio); f.setDate(inicio.getDate()+i);
+    const dia = iso(f);
+    if(i>=35 && f.getMonth()!==m) break;
+    const evs = S.desvios.filter(d => activoEn(d, dia));
+    const max = 3;
+    html += `<div class="dia ${f.getMonth()!==m?'fuera':''} ${dia===hoy?'hoy':''}" data-dia="${dia}">
+      <span class="num">${f.getDate()}</span>
+      ${evs.slice(0,max).map(d => `<div class="ev ${d.fecha_fin===dia?'fin':''}" style="background:${colorDe(d.id)}" data-ver="${d.id}" title="${esc((d.lineas||[]).join(', ') + ' — ' + d.titulo)}">${esc((d.lineas||[]).join(' · ') || '—')} ${esc(d.titulo)}</div>`).join('')}
+      ${evs.length>max ? `<div class="mas">+${evs.length-max} más</div>` : ''}
+    </div>`;
+  }
+  $('cal').innerHTML = html;
+}
+
+/* ===================== Listado / reclamos ===================== */
+function renderListado(){
+  const fl = normLinea($('f-linea').value.trim());
+  const ff = $('f-fecha').value;
+  const ft = $('f-texto').value.trim().toLowerCase();
+  const fe = $('f-estado').value;
+  const hoy = hoyISO();
+  const lista = S.desvios.filter(d => {
+    if(fl && !(d.lineas||[]).some(l => normLinea(l) === fl)) return false;
+    if(ff && !activoEn(d, ff)) return false;
+    if(ft && !(`${d.titulo} ${d.observaciones||''} ${(d.paradas_suspendidas||[]).join(' ')}`.toLowerCase().includes(ft))) return false;
+    if(fe && estadoDe(d, hoy) !== fe) return false;
+    return true;
+  });
+
+  const r = $('resultado-reclamo');
+  if(ff && fl){
+    r.innerHTML = lista.length
+      ? `<div class="resultado-reclamo si"><b>Sí:</b> el ${fmt(ff)} la línea <b>${esc($('f-linea').value.trim())}</b> estaba desviando (${lista.length} desvío${lista.length>1?'s':''} abajo).</div>`
+      : `<div class="resultado-reclamo no"><b>No</b> hay desvíos registrados para la línea <b>${esc($('f-linea').value.trim())}</b> el ${fmt(ff)}.</div>`;
+  } else if(ff){
+    r.innerHTML = `<div class="resultado-reclamo ${lista.length?'si':'no'}">${lista.length ? `El ${fmt(ff)} había <b>${lista.length}</b> desvío(s) activos.` : `No hay desvíos registrados el ${fmt(ff)}.`}</div>`;
+  } else r.innerHTML = '';
+
+  $('tabla').innerHTML = lista.map(d => `
+    <tr class="fila" data-ver="${d.id}">
+      <td>${chips(d.lineas)}</td>
+      <td><b>${esc(d.titulo)}</b>${d.pdf_path ? ' <span class="muted peq">· PDF</span>' : ''}</td>
+      <td>${fmt(d.fecha_inicio)}</td>
+      <td>${d.fecha_fin ? fmt(d.fecha_fin) : '<span class="muted">sin fecha</span>'}</td>
+      <td class="col-movil-ocultar peq">${esc((d.paradas_suspendidas||[]).join(', ')) || '<span class="muted">—</span>'}</td>
+      <td>${badge(estadoDe(d, hoy))}</td>
+    </tr>`).join('') || `<tr><td colspan="6" class="muted" style="padding:18px;text-align:center">No hay desvíos que coincidan.</td></tr>`;
+  $('conteo').textContent = `${lista.length} de ${S.desvios.length} desvíos`;
+}
+
+/* ===================== Detalle ===================== */
+function verDetalle(id){
+  const d = S.desvios.find(x => x.id === id); if(!d) return;
+  const url = urlPDF(d);
+  $('d-titulo').textContent = d.titulo;
+  $('d-dl').innerHTML = `
+    <dt>Estado</dt><dd>${badge(estadoDe(d))}</dd>
+    <dt>Líneas</dt><dd>${chips(d.lineas) || '—'}</dd>
+    <dt>Vigencia</dt><dd>Del ${fmt(d.fecha_inicio)} al ${d.fecha_fin ? fmt(d.fecha_fin) : 'nuevo aviso'}</dd>
+    <dt>Paradas suspendidas</dt><dd>${esc((d.paradas_suspendidas||[]).join(', ')) || '—'}</dd>
+    <dt>Paradas levantadas</dt><dd>${d.paradas_levantadas ? `Sí — ${esc(d.levantadas_por||'')} ${d.levantadas_en ? new Date(d.levantadas_en).toLocaleString('es-UY') : ''}` : 'No'}</dd>
+    <dt>Observaciones</dt><dd style="white-space:pre-wrap">${esc(d.observaciones) || '—'}</dd>
+    <dt>Comunicado</dt><dd>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(d.pdf_nombre || 'Ver PDF')}</a>` : '—'}</dd>
+    <dt>Cargado por</dt><dd class="peq muted">${esc(d.cargado_por || '—')} · ${new Date(d.creado).toLocaleString('es-UY')}</dd>`;
+  let pie = '';
+  if(S.user){
+    if((d.paradas_suspendidas||[]).length && !d.paradas_levantadas && d.fecha_fin && d.fecha_fin <= hoyISO())
+      pie += `<button class="btn-gold" data-levantar="${d.id}">Marcar paradas levantadas</button>`;
+    pie += `<button class="btn-sec" data-editar="${d.id}">Editar / prorrogar</button>`;
+    pie += `<button class="btn-peligro" data-borrar="${d.id}">Eliminar</button>`;
+  }
+  pie += `<button class="btn" data-cerrar>Cerrar</button>`;
+  $('d-pie').innerHTML = pie;
+  abrir('m-detalle');
+}
+
+async function levantarParadas(id){
+  if(!S.user) return abrir('m-login');
+  const { error } = await sb.from(CONFIG.TABLA)
+    .update({ paradas_levantadas:true, levantadas_por:S.user.email, levantadas_en:new Date().toISOString() })
+    .eq('id', id);
+  if(error) return toast('Error: ' + error.message, 5000);
+  cerrarTodo(); toast('Paradas marcadas como levantadas'); cargar();
+}
+
+async function borrar(id){
+  const d = S.desvios.find(x => x.id === id); if(!d) return;
+  if(!confirm(`¿Eliminar el desvío "${d.titulo}"? No se puede deshacer.`)) return;
+  if(d.pdf_path) await sb.storage.from(CONFIG.BUCKET).remove([d.pdf_path]);
+  const { error } = await sb.from(CONFIG.TABLA).delete().eq('id', id);
+  if(error) return toast('Error: ' + error.message, 5000);
+  cerrarTodo(); toast('Desvío eliminado'); cargar();
+}
+
+/* ===================== Formulario ===================== */
+function limpiarForm(){
+  S.editando = null; S.archivo = null;
+  ['c-titulo','c-lineas','c-inicio','c-fin','c-paradas','c-obs'].forEach(i => $(i).value = '');
+  $('c-sinfin').checked = false; $('c-fin').disabled = false;
+  $('archivo').value = '';
+  $('form-titulo').textContent = 'Nuevo desvío';
+  $('c-guardar').textContent = 'Guardar desvío';
+  $('drop-txt').innerHTML = `<b>Arrastrá el PDF del comunicado acá</b> o hacé clic para elegirlo.<br><span class="muted peq">Se leen solos las líneas, las fechas y las paradas suspendidas. Revisá los datos antes de guardar.</span>`;
+}
+
+function editar(id){
+  const d = S.desvios.find(x => x.id === id); if(!d) return;
+  cerrarTodo(); limpiarForm();
+  S.editando = d;
+  $('c-titulo').value = d.titulo;
+  $('c-lineas').value = (d.lineas||[]).join(', ');
+  $('c-inicio').value = d.fecha_inicio;
+  $('c-fin').value = d.fecha_fin || '';
+  $('c-sinfin').checked = !d.fecha_fin; $('c-fin').disabled = !d.fecha_fin;
+  $('c-paradas').value = (d.paradas_suspendidas||[]).join(', ');
+  $('c-obs').value = d.observaciones || '';
+  $('form-titulo').textContent = 'Editar desvío';
+  $('c-guardar').textContent = 'Guardar cambios';
+  $('drop-txt').innerHTML = d.pdf_path
+    ? `<b>Comunicado actual:</b> ${esc(d.pdf_nombre||'PDF')}<br><span class="muted peq">Si llegó un comunicado nuevo (por ejemplo una prórroga), arrastralo acá para reemplazarlo.</span>`
+    : `<b>Arrastrá el PDF del comunicado acá</b> o hacé clic para elegirlo.`;
+  irA('cargar');
+}
+
+async function procesarArchivo(file){
+  if(!file) return;
+  if(file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) return toast('El archivo tiene que ser PDF');
+  S.archivo = file;
+  $('drop-txt').innerHTML = `<b>${esc(file.name)}</b><br><span class="muted peq">Leyendo el comunicado…</span>`;
+  try{
+    const texto = await textoDePDF(file);
+    const r = analizarComunicado(texto, new Date().getFullYear());
+    const completar = (id, v) => { if(v && (!$(id).value || !S.editando)) $(id).value = v; };
+    completar('c-titulo', r.titulo || file.name.replace(/\.pdf$/i,''));
+    if(r.lineas.length) completar('c-lineas', r.lineas.join(', '));
+    completar('c-inicio', r.inicio);
+    if(r.sinFin){ $('c-sinfin').checked = true; $('c-fin').value=''; $('c-fin').disabled = true; }
+    else if(r.fin){ $('c-fin').value = r.fin; $('c-sinfin').checked=false; $('c-fin').disabled=false; }
+    if(r.paradas.length) completar('c-paradas', r.paradas.join(', '));
+    if(r.detalleParadas && !$('c-obs').value) $('c-obs').value = r.detalleParadas;
+    const faltan = [];
+    if(!r.lineas.length) faltan.push('líneas');
+    if(!r.inicio) faltan.push('fecha de inicio');
+    if(!r.fin && !r.sinFin) faltan.push('fecha de fin');
+    if(!r.paradas.length) faltan.push('paradas');
+    $('drop-txt').innerHTML = `<b>${esc(file.name)}</b><br><span class="peq" style="color:${faltan.length?'var(--ambar)':'var(--verde)'}">${
+      faltan.length ? 'No se encontró: ' + faltan.join(', ') + '. Completalo a mano.' : 'Datos leídos. Revisalos antes de guardar.'}</span>`;
+  }catch(e){
+    console.error(e);
+    $('drop-txt').innerHTML = `<b>${esc(file.name)}</b><br><span class="peq" style="color:var(--ambar)">No se pudo leer el texto del PDF (¿es escaneado?). Completá los datos a mano; el archivo se guarda igual.</span>`;
+  }
+}
+
+function nombreSeguro(n){
+  return n.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\w.\-]+/g,'_').slice(-80);
+}
+
+async function guardar(){
+  if(!S.user) return abrir('m-login');
+  const datos = {
+    titulo: $('c-titulo').value.trim(),
+    lineas: listaDeTexto($('c-lineas').value),
+    fecha_inicio: $('c-inicio').value || null,
+    fecha_fin: $('c-sinfin').checked ? null : ($('c-fin').value || null),
+    paradas_suspendidas: listaDeTexto($('c-paradas').value),
+    observaciones: $('c-obs').value.trim() || null
+  };
+  if(!datos.titulo) return toast('Falta el título');
+  if(!datos.lineas.length) return toast('Falta al menos una línea');
+  if(!datos.fecha_inicio) return toast('Falta la fecha de inicio');
+  if(!datos.fecha_fin && !$('c-sinfin').checked) return toast('Falta la fecha de fin (o marcá "sin fecha de fin")');
+  if(datos.fecha_fin && datos.fecha_fin < datos.fecha_inicio) return toast('La fecha de fin es anterior a la de inicio');
+
+  $('c-guardar').disabled = true; $('c-guardar').textContent = 'Guardando…';
+  try{
+    if(S.archivo){
+      const ruta = `${datos.fecha_inicio.slice(0,4)}/${Date.now()}_${nombreSeguro(S.archivo.name)}`;
+      const up = await sb.storage.from(CONFIG.BUCKET).upload(ruta, S.archivo, {contentType:'application/pdf'});
+      if(up.error) throw up.error;
+      if(S.editando?.pdf_path) await sb.storage.from(CONFIG.BUCKET).remove([S.editando.pdf_path]);
+      datos.pdf_path = ruta; datos.pdf_nombre = S.archivo.name;
+    }
+    let res;
+    if(S.editando) res = await sb.from(CONFIG.TABLA).update(datos).eq('id', S.editando.id);
+    else { datos.cargado_por = S.user.email; res = await sb.from(CONFIG.TABLA).insert(datos); }
+    if(res.error) throw res.error;
+    toast(S.editando ? 'Cambios guardados' : 'Desvío guardado. Se va a avisar cuando finalice.');
+    limpiarForm(); await cargar(); irA('listado');
+  }catch(e){
+    toast('Error al guardar: ' + (e.message || e), 6000);
+  }finally{
+    $('c-guardar').disabled = false;
+    $('c-guardar').textContent = S.editando ? 'Guardar cambios' : 'Guardar desvío';
+  }
+}
+
+/* ===================== Exportar .ics ===================== */
+function exportarICS(){
+  const escICS = (s) => String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n');
+  const plegar = (l) => { const out=[]; while(l.length>74){ out.push(l.slice(0,74)); l=' '+l.slice(74); } out.push(l); return out.join('\r\n'); };
+  const f = (s) => s.replace(/-/g,'');
+  const stamp = new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d+Z$/,'Z');
+  const ev = [];
+  for(const d of S.desvios){
+    const finExcl = sumarDias(d.fecha_fin || d.fecha_inicio, 1);
+    const desc = [
+      'Líneas: ' + (d.lineas||[]).join(', '),
+      'Vigencia: ' + fmt(d.fecha_inicio) + ' al ' + (d.fecha_fin ? fmt(d.fecha_fin) : 'nuevo aviso'),
+      'Paradas suspendidas: ' + ((d.paradas_suspendidas||[]).join(', ') || '—'),
+      d.observaciones ? 'Observaciones: ' + d.observaciones : '',
+      urlPDF(d) ? 'Comunicado: ' + urlPDF(d) : ''
+    ].filter(Boolean).join('\n');
+    ev.push('BEGIN:VEVENT', `UID:${d.id}@registro-desvios-uptu`, `DTSTAMP:${stamp}`,
+      `DTSTART;VALUE=DATE:${f(d.fecha_inicio)}`, `DTEND;VALUE=DATE:${f(finExcl)}`,
+      plegar(`SUMMARY:${escICS('Desvío ' + (d.lineas||[]).join(', ') + ' – ' + d.titulo + (d.fecha_fin ? '' : ' (sin fecha de fin)'))}`),
+      plegar(`DESCRIPTION:${escICS(desc)}`), 'END:VEVENT');
+  }
+  const ics = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//UPTU IM//Registro de Desvios//ES','CALSCALE:GREGORIAN',
+    'X-WR-CALNAME:Desvíos STM – UPTU', ...ev, 'END:VCALENDAR'].join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([ics], {type:'text/calendar'}));
+  a.download = `desvios-stm-${hoyISO()}.ics`; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+}
+
+/* ===================== Navegación, modales, login ===================== */
+function irA(tab){
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('activo', b.dataset.tab===tab));
+  ['calendario','listado','cargar'].forEach(t => $('tab-'+t).classList.toggle('oculto', t!==tab));
+}
+function abrir(id){ $(id).classList.add('abierto'); }
+function cerrarTodo(){ document.querySelectorAll('.modal-fondo').forEach(m=>m.classList.remove('abierto')); }
+
+function actualizarUsuario(){
+  $('usuario').textContent = S.user ? S.user.email : '';
+  $('btn-login').textContent = S.user ? 'Salir' : 'Ingresar';
+  $('aviso-login').classList.toggle('oculto', !!S.user);
+  $('form-wrap').style.opacity = S.user ? 1 : .55;
+  $('form-wrap').style.pointerEvents = S.user ? 'auto' : 'none';
+  renderAlertas();
+}
+
+async function entrar(){
+  $('l-error').textContent = '';
+  const { error } = await sb.auth.signInWithPassword({ email:$('l-email').value.trim(), password:$('l-pass').value });
+  if(error) { $('l-error').textContent = 'No se pudo ingresar: ' + error.message; return; }
+  cerrarTodo(); toast('Sesión iniciada');
+}
+
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-ver],[data-levantar],[data-editar],[data-borrar],[data-cerrar],[data-dia]');
+  if(!t) { if(e.target.classList.contains('modal-fondo')) cerrarTodo(); return; }
+  if(t.dataset.levantar){ e.stopPropagation(); return levantarParadas(t.dataset.levantar); }
+  if(t.dataset.editar) return editar(t.dataset.editar);
+  if(t.dataset.borrar) return borrar(t.dataset.borrar);
+  if(t.hasAttribute('data-cerrar')) return cerrarTodo();
+  if(t.dataset.ver){ e.stopPropagation(); return verDetalle(t.dataset.ver); }
+  if(t.dataset.dia){ $('f-fecha').value = t.dataset.dia; $('f-linea').value=''; $('f-texto').value=''; $('f-estado').value=''; renderListado(); irA('listado'); }
+});
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => irA(b.dataset.tab));
+$('mes-ant').onclick = () => { S.mes.setMonth(S.mes.getMonth()-1); renderCalendario(); };
+$('mes-sig').onclick = () => { S.mes.setMonth(S.mes.getMonth()+1); renderCalendario(); };
+$('mes-hoy').onclick = () => { S.mes = new Date(); S.mes.setDate(1); renderCalendario(); };
+['f-linea','f-fecha','f-texto','f-estado'].forEach(id => $(id).addEventListener('input', renderListado));
+$('f-limpiar').onclick = () => { ['f-linea','f-fecha','f-texto','f-estado'].forEach(id => $(id).value=''); renderListado(); };
+$('btn-ics').onclick = exportarICS;
+$('btn-login').onclick = async () => { if(S.user){ await sb.auth.signOut(); toast('Sesión cerrada'); } else abrir('m-login'); };
+$('link-login').onclick = (e) => { e.preventDefault(); abrir('m-login'); };
+$('l-entrar').onclick = entrar;
+$('l-pass').addEventListener('keydown', e => { if(e.key==='Enter') entrar(); });
+$('c-sinfin').onchange = () => { $('c-fin').disabled = $('c-sinfin').checked; if($('c-sinfin').checked) $('c-fin').value=''; };
+$('c-guardar').onclick = guardar;
+$('c-cancelar').onclick = () => { limpiarForm(); irA('calendario'); };
+const drop = $('drop');
+drop.onclick = () => $('archivo').click();
+$('archivo').onchange = (e) => procesarArchivo(e.target.files[0]);
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('sobre'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('sobre'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('sobre'); procesarArchivo(e.dataTransfer.files[0]); });
+document.addEventListener('keydown', e => { if(e.key==='Escape') cerrarTodo(); });
+
+sb.auth.onAuthStateChange((_ev, session) => { S.user = session?.user || null; actualizarUsuario(); });
+(async () => {
+  const { data } = await sb.auth.getSession();
+  S.user = data.session?.user || null;
+  actualizarUsuario();
+  await cargar();
+})();
+</script>
+</body>
+</html>

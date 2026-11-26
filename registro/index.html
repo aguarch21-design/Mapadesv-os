@@ -193,8 +193,8 @@
         <div class="campo"><label>Fecha de inicio</label><input type="date" id="c-inicio"></div>
         <div class="campo"><label>Fecha de fin</label><input type="date" id="c-fin">
           <label style="font-weight:400;display:flex;gap:6px;align-items:center"><input type="checkbox" id="c-sinfin"> Sin fecha de fin (hasta nuevo aviso)</label></div>
-        <div class="campo full"><label>Paradas suspendidas</label><input id="c-paradas" placeholder="Ej. 2345, 2346, 2350">
-          <span class="ayuda">Números de parada separados por coma. Son las que hay que levantar cuando finalice el desvío.</span></div>
+        <div class="campo full"><label>Paradas suspendidas</label><input id="c-paradas" placeholder="Ej. 2345, 2346 — o — Herrera y Reissig esq. Ibiray, …">
+          <span class="ayuda">Número de parada o esquina, separadas por coma. Son las que hay que levantar cuando finalice el desvío.</span></div>
         <div class="campo full"><label>Observaciones</label><textarea id="c-obs" rows="4" placeholder="Recorrido alternativo, paradas provisorias, detalle de paradas…"></textarea></div>
       </div>
       <div class="acciones">
@@ -258,12 +258,12 @@ function buscarFechas(texto, anioBase){
     let a = m[3] ? parseInt(m[3],10) : anioBase;
     if(a < 100) a += 2000;
     const iso = fechaValida(parseInt(m[1],10), parseInt(m[2],10), a);
-    if(iso) out.push({iso, idx:m.index});
+    if(iso) out.push({iso, idx:m.index, sinAnio:!m[3]});
   }
   while((m = reTxt.exec(texto))){
     const a = m[3] ? parseInt(m[3],10) : anioBase;
     const iso = fechaValida(parseInt(m[1],10), MESES[m[2].toLowerCase()], a);
-    if(iso) out.push({iso, idx:m.index});
+    if(iso) out.push({iso, idx:m.index, sinAnio:!m[3]});
   }
   return out.sort((x,y)=>x.idx-y.idx);
 }
@@ -323,6 +323,10 @@ function buscarParadas(lineas){
       if(lista) lista[1].split(/\s*(?:,|y|e|-|\/)\s*/).forEach(c=>codigos.add(c));
     }
   }
+  if(!codigos.size && detalle.length){
+    const sinTitulo = detalle.join(' ').replace(/^.*?(suspendidas?|sin servicio|no se atender[aá]n?)\s*:?\s*/i, '');
+    paradasDeValor(sinTitulo).forEach(p => codigos.add(p));
+  }
   return { codigos:[...codigos], detalle: detalle.filter(Boolean).join('\n') };
 }
 
@@ -333,7 +337,72 @@ function buscarTitulo(lineas){
   return primera ? primera.trim() : '';
 }
 
-function analizarComunicado(texto, anioBase){
+function paradasDeValor(valor){
+  const v = (valor||'').replace(/\s+/g,' ').trim();
+  if(!v || /^(-|no|ninguna|no corresponde|n\/?a)\.?$/i.test(v)) return [];
+  const codigos = v.match(/\b\d{3,5}\b/g);
+  // Si son números de parada sueltos, usar los números; si no, cada esquina es una parada
+  if(codigos && codigos.length && v.replace(/[\d\s,;y\-\/.]|n[º°o]/gi,'').length < 10) return [...new Set(codigos)];
+  return v.split(/\s*[;,]\s*|\s+-\s+/).map(s=>s.replace(/\.+$/,'').trim()).filter(s=>s.length>2);
+}
+
+/* Lee comunicados armados como tabla de dos columnas (etiqueta | dato).
+   Recibe las piezas de texto con su posición y devuelve [{etiqueta, valor}] o null. */
+const RE_ETIQUETA = /^(calle principal|calle|entre|fecha|hora|horario|motivo|l[ií]neas?\b|paradas? suspendidas?|paradas? provisorias?|modificado|observaciones?|recorrido)/i;
+function camposDeTabla(paginas){
+  const campos = [];
+  for(const items of paginas){
+    const etiquetas0 = items.filter(it => RE_ETIQUETA.test(it.s.trim()));
+    if(etiquetas0.length < 3) continue;
+    const xEtiq = Math.min(...etiquetas0.map(it=>it.x));
+    const xValores = items.filter(it => it.x > xEtiq + 60 && etiquetas0.some(e => Math.abs(e.y-it.y) < 2)).map(it=>it.x);
+    if(!xValores.length) continue;
+    const corte = (xEtiq + Math.min(...xValores)) / 2;
+    const yMax = Math.max(...etiquetas0.map(e=>e.y)) + 40, yMin = Math.min(...etiquetas0.map(e=>e.y)) - 40;
+    const enTabla = items.filter(it => it.y <= yMax && it.y >= yMin && it.x >= xEtiq - 5);
+    const filas = (lado) => {
+      const fs = [];
+      for(const it of enTabla.filter(lado)){
+        let f = fs.find(f => Math.abs(f.y - it.y) < 2);
+        if(!f){ f = {y:it.y, items:[]}; fs.push(f); }
+        f.items.push(it);
+      }
+      fs.forEach(f => { f.items.sort((a,b)=>a.x-b.x); let t='', fin=null;
+        for(const it of f.items){ if(fin!==null && it.x-fin>1.5 && !t.endsWith(' ')) t+=' '; t+=it.s; fin=it.x+it.w; }
+        f.t = t.replace(/\s+/g,' ').trim(); });
+      return fs.filter(f=>f.t).sort((a,b)=>b.y-a.y);
+    };
+    const izq = filas(it => it.x < corte), der = filas(it => it.x >= corte);
+    // Agrupar renglones de etiqueta (una etiqueta puede ocupar 2 renglones)
+    const bloques = [];
+    for(const f of izq){
+      const ult = bloques[bloques.length-1];
+      if(ult && !RE_ETIQUETA.test(f.t) && ult.yInf - f.y < 20){ ult.t += ' ' + f.t; ult.yInf = f.y; }
+      else bloques.push({t:f.t, ySup:f.y, yInf:f.y});
+    }
+    bloques.forEach(b => b.c = (b.ySup + b.yInf)/2);
+    // Repartir los renglones de la derecha entre las etiquetas (celdas centradas verticalmente)
+    const n = der.length, k = bloques.length, INF = 1e9, VACIO = 15;
+    // No cortar entre renglones seguidos del mismo párrafo (interlineado normal)
+    const gaps = der.slice(1).map((f,i) => der[i].y - f.y).filter(g => g > 3);
+    const interlinea = gaps.length ? Math.min(...gaps) : 12;
+    const corteOk = (p) => p===0 || p===n || (der[p-1].y - der[p].y) > interlinea * 1.25;
+    const costo = (i, j, b) => { if(i===j) return VACIO; if(!corteOk(i) || !corteOk(j)) return INF; let s=0; for(let r=i;r<j;r++) s+=der[r].y; return Math.abs(s/(j-i) - bloques[b].c); };
+    const dp = Array.from({length:k+1}, () => Array(n+1).fill(INF)), desde = Array.from({length:k+1}, () => Array(n+1).fill(0));
+    dp[0][0] = 0;
+    for(let b=1;b<=k;b++) for(let j=0;j<=n;j++) for(let i=0;i<=j;i++){
+      const c = dp[b-1][i] + costo(i, j, b-1);
+      if(c < dp[b][j]){ dp[b][j] = c; desde[b][j] = i; }
+    }
+    const partes = []; let j = n;
+    for(let b=k;b>=1;b--){ const i = desde[b][j]; partes[b-1] = der.slice(i, j).map(f=>f.t).join(' '); j = i; }
+    bloques.forEach((b, idx) => campos.push({ etiqueta:b.t, valor:(partes[idx]||'').trim() }));
+  }
+  return campos.length >= 3 ? campos : null;
+}
+
+function analizarComunicado(texto, anioBase, campos){
+  if(campos) return analizarCampos(campos, texto, anioBase);
   const lineas = texto.split('\n').map(l=>l.replace(/\s+/g,' ').trim()).filter(Boolean);
   const plano = lineas.join('\n');
   const fechas = buscarFechas(plano, anioBase);
@@ -364,6 +433,48 @@ function analizarComunicado(texto, anioBase){
     detalleParadas: par.detalle
   };
 }
+function fechasDe(texto, anioBase){
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const fs = buscarFechas(texto, anioBase);
+  // "6 de enero" sin año escrito en diciembre → enero del año siguiente
+  for(const f of fs){
+    if(f.sinAnio && (hoy - new Date(f.iso+'T00:00:00')) > 120*864e5) f.iso = String(parseInt(f.iso.slice(0,4))+1) + f.iso.slice(4);
+  }
+  return fs;
+}
+
+function analizarCampos(campos, texto, anioBase){
+  const val = (re) => (campos.find(c => re.test(c.etiqueta)) || {}).valor || '';
+  const bloquesLineas = campos.filter(c => /^l[ií]neas?\b/i.test(c.etiqueta));
+  const lineas = [...new Set(bloquesLineas.flatMap(c => buscarLineas(c.etiqueta + (/\d/.test(c.etiqueta) ? '' : ' ' + c.valor))))];
+  // Fechas: solo del campo Fecha
+  const textoFecha = val(/^fecha/i);
+  let inicio=null, fin=null; const libres=[];
+  for(const f of fechasDe(textoFecha, anioBase)){
+    const c = clasificarFecha(textoFecha, f.idx);
+    if(c==='inicio' && !inicio) inicio = f.iso;
+    else if(c==='fin' && !fin) fin = f.iso;
+    else libres.push(f.iso);
+  }
+  if(!inicio && libres.length) inicio = libres.shift();
+  if(!fin && libres.length) fin = libres.pop();
+  if(inicio && !fin && fechasDe(textoFecha, anioBase).length === 1 && !/a partir|desde/i.test(textoFecha)) fin = inicio;
+  const sinFin = /hasta\s+nuevo\s+aviso|indeterminad|sin\s+fecha/i.test(textoFecha);
+  const calle = val(/^calle/i), entre = val(/^entre/i), motivo = val(/^motivo/i);
+  let titulo = calle ? calle + (entre ? ` (${entre})` : '') : '';
+  if(motivo) titulo = titulo ? `${titulo} – ${motivo}` : motivo;
+  const obs = [];
+  const hora = val(/^(hora|horario)/i); if(hora) obs.push('Hora: ' + hora);
+  bloquesLineas.forEach(c => c.valor && obs.push(c.etiqueta + ': ' + c.valor));
+  const prov = val(/^paradas? provisori/i); if(prov) obs.push('Paradas provisorias: ' + prov);
+  const nota = val(/^observaci/i); if(nota) obs.push('Observaciones: ' + nota);
+  return {
+    titulo: titulo || buscarTitulo(texto.split('\n')),
+    lineas, inicio, fin: sinFin ? null : fin, sinFin,
+    paradas: paradasDeValor(val(/^paradas? suspendid/i)),
+    detalleParadas: obs.join('\n')
+  };
+}
 /* ===================== LECTOR DE COMUNICADOS (fin) ===================== */
 
 if (window.pdfjsLib) {
@@ -372,10 +483,11 @@ if (window.pdfjsLib) {
 
 async function textoDePDF(file){
   const pdf = await pdfjsLib.getDocument({data: await file.arrayBuffer()}).promise;
-  const salida = [];
+  const salida = [], paginas = [];
   for(let p=1;p<=pdf.numPages;p++){
     const page = await pdf.getPage(p);
     const tc = await page.getTextContent();
+    paginas.push(tc.items.filter(it => it.str && it.str.trim()).map(it => ({x:it.transform[4], y:it.transform[5], w:it.width||0, s:it.str.replace(/\u200b/g,'')})));
     const filas = [];
     for(const it of tc.items){
       if(!it.str || !it.str.trim()) continue;
@@ -395,7 +507,7 @@ async function textoDePDF(file){
       salida.push(linea);
     }
   }
-  return salida.join('\n');
+  return { texto: salida.join('\n').replace(/\u200b/g,''), paginas };
 }
 
 /* ===================== Utilidades ===================== */
@@ -602,8 +714,8 @@ async function procesarArchivo(file){
   S.archivo = file;
   $('drop-txt').innerHTML = `<b>${esc(file.name)}</b><br><span class="muted peq">Leyendo el comunicado…</span>`;
   try{
-    const texto = await textoDePDF(file);
-    const r = analizarComunicado(texto, new Date().getFullYear());
+    const { texto, paginas } = await textoDePDF(file);
+    const r = analizarComunicado(texto, new Date().getFullYear(), camposDeTabla(paginas));
     const completar = (id, v) => { if(v && (!$(id).value || !S.editando)) $(id).value = v; };
     completar('c-titulo', r.titulo || file.name.replace(/\.pdf$/i,''));
     if(r.lineas.length) completar('c-lineas', r.lineas.join(', '));

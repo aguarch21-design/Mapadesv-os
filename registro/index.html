@@ -339,7 +339,7 @@ function buscarTitulo(lineas){
 
 function paradasDeValor(valor){
   const v = (valor||'').replace(/\s+/g,' ').trim();
-  if(!v || /^(-|no|ninguna|no corresponde|n\/?a)\.?$/i.test(v)) return [];
+  if(!v || /^(-+|n\/?a|ninguna?s?|sin\b|no\b)/i.test(v)) return [];   // "No se suspenden paradas", "Sin paradas", "Ninguna", "-" 
   const codigos = v.match(/\b\d{3,5}\b/g);
   // Si son números de parada sueltos, usar los números; si no, cada esquina es una parada
   if(codigos && codigos.length && v.replace(/[\d\s,;y\-\/.]|n[º°o]/gi,'').length < 10) return [...new Set(codigos)];
@@ -467,6 +467,8 @@ function analizarCampos(campos, texto, anioBase){
   const hora = val(/^(hora|horario)/i); if(hora) obs.push('Hora: ' + hora);
   bloquesLineas.forEach(c => c.valor && obs.push(c.etiqueta + ': ' + c.valor));
   const prov = val(/^paradas? provisori/i); if(prov) obs.push('Paradas provisorias: ' + prov);
+  campos.filter(c => c.valor && !/^(calle|entre|fecha|hora|horario|motivo|l[ií]neas?\b|paradas?|observaci|modificado)/i.test(c.etiqueta))
+        .forEach(c => obs.push(c.etiqueta + ': ' + c.valor));
   const nota = val(/^observaci/i); if(nota) obs.push('Observaciones: ' + nota);
   return {
     titulo: titulo || buscarTitulo(texto.split('\n')),

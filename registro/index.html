@@ -289,13 +289,13 @@ function buscarLineas(texto){
   let m;
   while((m = re.exec(texto))){
     const toks = m[1].split(/[\s,;\/()]+/).filter(Boolean);
-    let tomadas = 0;
+    let tomadas = 0, saltadas = 0;
     for(const t0 of toks){
       const t = t0.replace(/[.:]+$/,'');
       if(/^(y|e|las?|n[º°o]\.?|nros?\.?|números?)$/i.test(t)) continue;
       if(esCodigoLinea(t)){ set.add(t); tomadas++; continue; }
       if(/[a-záéíóúñ]/.test(t) && tomadas>0) break;   // terminó la lista
-      if(/[a-záéíóúñ]{3,}/.test(t) && tomadas===0) break;
+      if(/[a-záéíóúñ]{2,}/i.test(t) && tomadas===0 && ++saltadas > 3) break;  // "por Colonia", "de la"…
     }
   }
   return [...set];
@@ -341,15 +341,33 @@ function buscarTitulo(lineas){
 function paradasDeValor(valor){
   const v = (valor||'').replace(/\s+/g,' ').trim();
   if(!v || /^(-+|n\/?a|ninguna?s?|sin\b|no\b)/i.test(v)) return [];   // "No se suspenden paradas", "Sin paradas", "Ninguna", "-" 
+  const esq = v.match(/^(.+?)\s+(?:en\s+)?esq(?:uina|\.)?\s+(?:con\s+)?(.+?)\.?$/i);
+  if(esq && !/\besq/i.test(esq[2]) && /,|\sy\s/.test(esq[2])){
+    return esq[2].split(/\s*,\s*|\s+y\s+/).map(s=>s.trim()).filter(Boolean).map(s => `${esq[1].trim()} esq. ${s}`);
+  }
   const codigos = v.match(/\b\d{3,5}\b/g);
   // Si son números de parada sueltos, usar los números; si no, cada esquina es una parada
   if(codigos && codigos.length && v.replace(/[\d\s,;y\-\/.]|n[º°o]/gi,'').length < 10) return [...new Set(codigos)];
-  return v.split(/\s*[;,]\s*|\s+-\s+/).map(s=>s.replace(/\.+$/,'').trim()).filter(s=>s.length>2);
+  return v.split(/\s*[;,]\s*|\s+-\s+/).flatMap(separarEsquinas).map(s=>s.replace(/\.+$/,'').trim()).filter(s=>s.length>2);
+}
+// "Solano López esq. Ramos y Solano López esq. Rivera" → dos paradas (sin romper "Herrera y Reissig esq. …")
+function separarEsquinas(s){
+  if((s.match(/\besq/gi)||[]).length < 2) return [s];
+  const partes = []; let resto = s;
+  for(;;){
+    const re = /\s+y\s+/g; let m, corte = -1;
+    while((m = re.exec(resto))){
+      if(/\besq/i.test(resto.slice(0, m.index)) && /\besq/i.test(resto.slice(m.index + m[0].length))){ corte = m.index; break; }
+    }
+    if(corte < 0){ partes.push(resto); break; }
+    partes.push(resto.slice(0, corte)); resto = resto.slice(corte).replace(/^\s+y\s+/, '');
+  }
+  return partes;
 }
 
 /* Lee comunicados armados como tabla de dos columnas (etiqueta | dato).
    Recibe las piezas de texto con su posición y devuelve [{etiqueta, valor}] o null. */
-const RE_ETIQUETA = /^(calle principal|calle|principal|entre|fecha|hora|horario|motivo|l[ií]neas?\b|paradas? suspendidas?|paradas? provisorias?|modificado|observaciones?|recorrido)/i;
+const RE_ETIQUETA = /^(calle principal|calle|principal|entre|fecha|hora|horario|motivo|l[ií]neas?\b|paradas? suspendidas?|paradas? suprimidas?|paradas? provisorias?|provisorias?|modificado|observaciones?|recorrido)/i;
 function camposDeTabla(paginas){
   const campos = [];
   for(const items of paginas){
@@ -387,8 +405,13 @@ function camposDeTabla(paginas){
     // No cortar entre renglones seguidos del mismo párrafo (interlineado normal)
     const alturas = der.flatMap(f => f.items.map(it => it.h || 0)).filter(Boolean).sort((a,b)=>a-b);
     const letra = alturas.length ? alturas[Math.floor(alturas.length/2)] : 10;
-    const corteOk = (p) => p===0 || p===n || (der[p-1].y - der[p].y) > letra * 1.6;
-    const costo = (i, j, b) => { if(i===j) return VACIO; if(!corteOk(i) || !corteOk(j)) return INF; let s=0; for(let r=i;r<j;r++) s+=der[r].y; return Math.abs(s/(j-i) - bloques[b].c); };
+    // Un renglón a la misma altura que una etiqueta pertenece a esa etiqueta
+    const ancla = der.map(f => { for(let b=0;b<bloques.length;b++){ if(Math.abs(bloques[b].ySup - f.y) < 2.5) return b; } return -1; });
+    const corteOk = (p) => p===0 || p===n || ancla[p] >= 0 || (der[p-1].y - der[p].y) > letra * 1.6;
+    const costo = (i, j, b) => {
+      if(i===j) return VACIO;
+      if(!corteOk(i) || !corteOk(j)) return INF;
+      for(let r=i;r<j;r++) if(ancla[r] >= 0 && ancla[r] !== b) return INF; let s=0; for(let r=i;r<j;r++) s+=der[r].y; return Math.abs(s/(j-i) - bloques[b].c); };
     const dp = Array.from({length:k+1}, () => Array(n+1).fill(INF)), desde = Array.from({length:k+1}, () => Array(n+1).fill(0));
     dp[0][0] = 0;
     for(let b=1;b<=k;b++) for(let j=0;j<=n;j++) for(let i=0;i<=j;i++){
@@ -444,6 +467,29 @@ function fechasDe(texto, anioBase){
   return fs;
 }
 
+const DIAS_SEM = {domingo:0, lunes:1, martes:2, miercoles:3, 'miércoles':3, jueves:4, viernes:5, sabado:6, 'sábado':6};
+function fechaEmision(texto){
+  const m = texto.match(/montevideo,?\s*(\d{1,2})\s+de\s+([a-záéíóú]+)\s+(?:de|del)\s+(\d{4})/i);
+  const mes = m && MESES[m[2].toLowerCase()];
+  return mes ? new Date(+m[3], mes-1, +m[1]) : new Date();
+}
+// "Domingo 29", "sábado 28 y domingo 29", "del 28 al 30": busca el próximo día con ese número (y ese día de la semana)
+function diasSinMes(t, base){
+  const limpio = t.replace(/\d{1,2}[:.]\d{2}\s*(h(s|oras)?)?/gi, ' ');
+  const out = [], re = /(?:\b(domingo|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado)\s+)?\b(\d{1,2})\b/gi;
+  let m;
+  while((m = re.exec(limpio))){
+    const n = +m[2]; if(n < 1 || n > 31) continue;
+    const dow = m[1] ? DIAS_SEM[m[1].toLowerCase()] : null;
+    const d = new Date(base); d.setHours(0,0,0,0); d.setDate(d.getDate() - 3);
+    for(let i=0;i<70;i++){
+      if(d.getDate() === n && (dow === null || d.getDay() === dow)){ out.push(`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`); break; }
+      d.setDate(d.getDate()+1);
+    }
+  }
+  return out.sort();
+}
+
 function analizarCampos(campos, texto, anioBase){
   const val = (re) => (campos.find(c => re.test(c.etiqueta)) || {}).valor || '';
   const bloquesLineas = campos.filter(c => /^l[ií]neas?\b/i.test(c.etiqueta));
@@ -459,6 +505,10 @@ function analizarCampos(campos, texto, anioBase){
   }
   if(!inicio && libres.length) inicio = libres.shift();
   if(!fin && libres.length) fin = libres.pop();
+  if(!inicio){
+    const dias = diasSinMes(textoFecha, fechaEmision(texto));
+    if(dias.length){ inicio = dias[0]; fin = dias[dias.length-1]; }
+  }
   if(inicio && !fin && fechasDe(textoFecha, anioBase).length === 1 && !/a partir|desde/i.test(textoFecha)) fin = inicio;
   const sinFin = /hasta\s+nuevo\s+aviso|indeterminad|sin\s+fecha/i.test(textoFecha);
   const calle = val(/^(calle|principal)/i), entre = val(/^entre/i), motivo = val(/^motivo/i);
@@ -467,14 +517,14 @@ function analizarCampos(campos, texto, anioBase){
   const obs = [];
   const hora = val(/^(hora|horario)/i); if(hora) obs.push('Hora: ' + hora);
   bloquesLineas.forEach(c => c.valor && obs.push(c.etiqueta + ': ' + c.valor));
-  const prov = val(/^paradas? provisori/i); if(prov) obs.push('Paradas provisorias: ' + prov);
-  campos.filter(c => c.valor && !/^(calle|principal|entre|fecha|hora|horario|motivo|l[ií]neas?\b|paradas?|observaci|modificado)/i.test(c.etiqueta))
+  const prov = val(/^(paradas? )?provisori/i); if(prov) obs.push('Paradas provisorias: ' + prov);
+  campos.filter(c => c.valor && !/^(calle|principal|entre|fecha|hora|horario|motivo|l[ií]neas?\b|paradas?|provisori|observaci|modificado)/i.test(c.etiqueta))
         .forEach(c => obs.push(c.etiqueta + ': ' + c.valor));
   const nota = val(/^observaci/i); if(nota) obs.push('Observaciones: ' + nota);
   return {
     titulo: titulo || buscarTitulo(texto.split('\n')),
     lineas, inicio, fin: sinFin ? null : fin, sinFin,
-    paradas: paradasDeValor(val(/^paradas? suspendid/i)),
+    paradas: paradasDeValor(val(/^paradas? (suspendid|suprimid)/i)),
     detalleParadas: obs.join('\n')
   };
 }
@@ -772,6 +822,22 @@ async function guardar(){
   if(!datos.fecha_fin && !$('c-sinfin').checked) return toast('Falta la fecha de fin (o marcá "sin fecha de fin")');
   if(datos.fecha_fin && datos.fecha_fin < datos.fecha_inicio) return toast('La fecha de fin es anterior a la de inicio');
 
+  // Control de duplicados: mismo PDF, o mismas fechas con alguna línea en común
+  if(!S.editando){
+    const lin = datos.lineas.map(normLinea);
+    const parecido = S.desvios.find(d =>
+      (S.archivo && d.pdf_nombre && d.pdf_nombre === S.archivo.name) ||
+      (d.fecha_inicio === datos.fecha_inicio && (d.fecha_fin || null) === datos.fecha_fin &&
+       (d.lineas||[]).some(l => lin.includes(normLinea(l)))));
+    if(parecido && !confirm(
+      `Ya hay un desvío cargado que parece el mismo:\n\n` +
+      `• ${parecido.titulo}\n• Líneas ${(parecido.lineas||[]).join(', ')}\n` +
+      `• Del ${fmt(parecido.fecha_inicio)} al ${parecido.fecha_fin ? fmt(parecido.fecha_fin) : 'nuevo aviso'}\n` +
+      `• Cargado por ${parecido.cargado_por || '—'}\n\n` +
+      `¿Querés guardarlo igual?\n(Aceptar = guardar de nuevo · Cancelar = no guardar)`)) {
+      return toast('No se guardó: ya estaba cargado');
+    }
+  }
   $('c-guardar').disabled = true; $('c-guardar').textContent = 'Guardando…';
   try{
     if(S.archivo){

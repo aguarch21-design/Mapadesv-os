@@ -151,7 +151,7 @@
   <section id="tab-listado" class="card oculto">
     <div class="filtros">
       <label>Línea<input id="f-linea" placeholder="Ej. 121" style="width:110px"></label>
-      <label>Fecha del reclamo<input type="date" id="f-fecha"></label>
+      <label>Fecha del reclamo<input id="f-fecha" class="fecha" placeholder="dd/mm/aaaa" inputmode="numeric" maxlength="10" style="width:120px"></label>
       <label>Texto<input id="f-texto" placeholder="Calle, motivo…" style="width:200px"></label>
       <label>Estado
         <select id="f-estado">
@@ -191,8 +191,8 @@
         <div class="campo full"><label>Título / motivo</label><input id="c-titulo" placeholder="Ej. Obras en 18 de Julio entre Ejido y Yaguarón"></div>
         <div class="campo full"><label>Líneas afectadas</label><input id="c-lineas" placeholder="Ej. 121, 181, D10">
           <span class="ayuda">Separadas por coma.</span></div>
-        <div class="campo"><label>Fecha de inicio</label><input type="date" id="c-inicio"></div>
-        <div class="campo"><label>Fecha de fin</label><input type="date" id="c-fin">
+        <div class="campo"><label>Fecha de inicio</label><input id="c-inicio" class="fecha" placeholder="dd/mm/aaaa" inputmode="numeric" maxlength="10"></div>
+        <div class="campo"><label>Fecha de fin</label><input id="c-fin" class="fecha" placeholder="dd/mm/aaaa" inputmode="numeric" maxlength="10">
           <label style="font-weight:400;display:flex;gap:6px;align-items:center"><input type="checkbox" id="c-sinfin"> Sin fecha de fin (hasta nuevo aviso)</label></div>
         <div class="campo full"><label>Paradas suspendidas</label><input id="c-paradas" placeholder="Ej. 2345, 2346 — o — Herrera y Reissig esq. Ibiray, …">
           <span class="ayuda">Número de parada o esquina, separadas por coma. Son las que hay que levantar cuando finalice el desvío.</span></div>
@@ -349,7 +349,7 @@ function paradasDeValor(valor){
 
 /* Lee comunicados armados como tabla de dos columnas (etiqueta | dato).
    Recibe las piezas de texto con su posición y devuelve [{etiqueta, valor}] o null. */
-const RE_ETIQUETA = /^(calle principal|calle|entre|fecha|hora|horario|motivo|l[ií]neas?\b|paradas? suspendidas?|paradas? provisorias?|modificado|observaciones?|recorrido)/i;
+const RE_ETIQUETA = /^(calle principal|calle|principal|entre|fecha|hora|horario|motivo|l[ií]neas?\b|paradas? suspendidas?|paradas? provisorias?|modificado|observaciones?|recorrido)/i;
 function camposDeTabla(paginas){
   const campos = [];
   for(const items of paginas){
@@ -359,7 +359,7 @@ function camposDeTabla(paginas){
     const xValores = items.filter(it => it.x > xEtiq + 60 && etiquetas0.some(e => Math.abs(e.y-it.y) < 2)).map(it=>it.x);
     if(!xValores.length) continue;
     const corte = (xEtiq + Math.min(...xValores)) / 2;
-    const yMax = Math.max(...etiquetas0.map(e=>e.y)) + 40, yMin = Math.min(...etiquetas0.map(e=>e.y)) - 40;
+    const yMax = Math.max(...etiquetas0.map(e=>e.y)) + 20, yMin = Math.min(...etiquetas0.map(e=>e.y)) - 40;
     const enTabla = items.filter(it => it.y <= yMax && it.y >= yMin && it.x >= xEtiq - 5);
     const filas = (lado) => {
       const fs = [];
@@ -385,9 +385,9 @@ function camposDeTabla(paginas){
     // Repartir los renglones de la derecha entre las etiquetas (celdas centradas verticalmente)
     const n = der.length, k = bloques.length, INF = 1e9, VACIO = 15;
     // No cortar entre renglones seguidos del mismo párrafo (interlineado normal)
-    const gaps = der.slice(1).map((f,i) => der[i].y - f.y).filter(g => g > 3);
-    const interlinea = gaps.length ? Math.min(...gaps) : 12;
-    const corteOk = (p) => p===0 || p===n || (der[p-1].y - der[p].y) > interlinea * 1.25;
+    const alturas = der.flatMap(f => f.items.map(it => it.h || 0)).filter(Boolean).sort((a,b)=>a-b);
+    const letra = alturas.length ? alturas[Math.floor(alturas.length/2)] : 10;
+    const corteOk = (p) => p===0 || p===n || (der[p-1].y - der[p].y) > letra * 1.6;
     const costo = (i, j, b) => { if(i===j) return VACIO; if(!corteOk(i) || !corteOk(j)) return INF; let s=0; for(let r=i;r<j;r++) s+=der[r].y; return Math.abs(s/(j-i) - bloques[b].c); };
     const dp = Array.from({length:k+1}, () => Array(n+1).fill(INF)), desde = Array.from({length:k+1}, () => Array(n+1).fill(0));
     dp[0][0] = 0;
@@ -461,14 +461,14 @@ function analizarCampos(campos, texto, anioBase){
   if(!fin && libres.length) fin = libres.pop();
   if(inicio && !fin && fechasDe(textoFecha, anioBase).length === 1 && !/a partir|desde/i.test(textoFecha)) fin = inicio;
   const sinFin = /hasta\s+nuevo\s+aviso|indeterminad|sin\s+fecha/i.test(textoFecha);
-  const calle = val(/^calle/i), entre = val(/^entre/i), motivo = val(/^motivo/i);
+  const calle = val(/^(calle|principal)/i), entre = val(/^entre/i), motivo = val(/^motivo/i);
   let titulo = calle ? calle + (entre ? ` (${entre})` : '') : '';
   if(motivo) titulo = titulo ? `${titulo} – ${motivo}` : motivo;
   const obs = [];
   const hora = val(/^(hora|horario)/i); if(hora) obs.push('Hora: ' + hora);
   bloquesLineas.forEach(c => c.valor && obs.push(c.etiqueta + ': ' + c.valor));
   const prov = val(/^paradas? provisori/i); if(prov) obs.push('Paradas provisorias: ' + prov);
-  campos.filter(c => c.valor && !/^(calle|entre|fecha|hora|horario|motivo|l[ií]neas?\b|paradas?|observaci|modificado)/i.test(c.etiqueta))
+  campos.filter(c => c.valor && !/^(calle|principal|entre|fecha|hora|horario|motivo|l[ií]neas?\b|paradas?|observaci|modificado)/i.test(c.etiqueta))
         .forEach(c => obs.push(c.etiqueta + ': ' + c.valor));
   const nota = val(/^observaci/i); if(nota) obs.push('Observaciones: ' + nota);
   return {
@@ -490,7 +490,7 @@ async function textoDePDF(file){
   for(let p=1;p<=pdf.numPages;p++){
     const page = await pdf.getPage(p);
     const tc = await page.getTextContent();
-    paginas.push(tc.items.filter(it => it.str && it.str.trim()).map(it => ({x:it.transform[4], y:it.transform[5], w:it.width||0, s:it.str.replace(/\u200b/g,'')})));
+    paginas.push(tc.items.filter(it => it.str && it.str.trim()).map(it => ({x:it.transform[4], y:it.transform[5], w:it.width||0, h:it.height||0, s:it.str.replace(/\u200b/g,'')})));
     const filas = [];
     for(const it of tc.items){
       if(!it.str || !it.str.trim()) continue;
@@ -521,6 +521,14 @@ const deISO = (s) => { const [a,m,d] = s.split('-').map(Number); return new Date
 const fmt = (s) => s ? s.split('-').reverse().join('/') : '—';
 const sumarDias = (s, n) => { const d = deISO(s); d.setDate(d.getDate()+n); return iso(d); };
 const hoyISO = () => iso(new Date());
+// Fechas en pantalla siempre dd/mm/aaaa (sin depender del idioma del navegador)
+const aTexto = (s) => s ? s.split('-').reverse().join('/') : '';
+function aISO(t){
+  const m = String(t||'').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+  if(!m) return '';
+  let a = parseInt(m[3],10); if(a < 100) a += 2000;
+  return fechaValida(parseInt(m[1],10), parseInt(m[2],10), a) || '';
+}
 const normLinea = (s) => String(s).toUpperCase().replace(/\s+/g,'');
 const listaDeTexto = (s) => s.split(/[,;\n]+/).map(x=>x.trim()).filter(Boolean);
 const COLORES = ['#003580','#0b7a75','#7c3aed','#c2410c','#be123c','#15803d','#1d4ed8','#a16207','#0e7490','#9d174d'];
@@ -607,7 +615,7 @@ function renderCalendario(){
 /* ===================== Listado / reclamos ===================== */
 function renderListado(){
   const fl = normLinea($('f-linea').value.trim());
-  const ff = $('f-fecha').value;
+  const ff = aISO($('f-fecha').value);
   const ft = $('f-texto').value.trim().toLowerCase();
   const fe = $('f-estado').value;
   const hoy = hoyISO();
@@ -701,8 +709,8 @@ function editar(id){
   S.editando = d;
   $('c-titulo').value = d.titulo;
   $('c-lineas').value = (d.lineas||[]).join(', ');
-  $('c-inicio').value = d.fecha_inicio;
-  $('c-fin').value = d.fecha_fin || '';
+  $('c-inicio').value = aTexto(d.fecha_inicio);
+  $('c-fin').value = aTexto(d.fecha_fin);
   $('c-sinfin').checked = !d.fecha_fin; $('c-fin').disabled = !d.fecha_fin;
   $('c-paradas').value = (d.paradas_suspendidas||[]).join(', ');
   $('c-obs').value = d.observaciones || '';
@@ -725,9 +733,9 @@ async function procesarArchivo(file){
     const completar = (id, v) => { if(v && (!$(id).value || !S.editando)) $(id).value = v; };
     completar('c-titulo', r.titulo || file.name.replace(/\.pdf$/i,''));
     if(r.lineas.length) completar('c-lineas', r.lineas.join(', '));
-    completar('c-inicio', r.inicio);
+    completar('c-inicio', aTexto(r.inicio));
     if(r.sinFin){ $('c-sinfin').checked = true; $('c-fin').value=''; $('c-fin').disabled = true; }
-    else if(r.fin){ $('c-fin').value = r.fin; $('c-sinfin').checked=false; $('c-fin').disabled=false; }
+    else if(r.fin){ $('c-fin').value = aTexto(r.fin); $('c-sinfin').checked=false; $('c-fin').disabled=false; }
     if(r.paradas.length) completar('c-paradas', r.paradas.join(', '));
     if(r.detalleParadas && !$('c-obs').value) $('c-obs').value = r.detalleParadas;
     const faltan = [];
@@ -752,14 +760,15 @@ async function guardar(){
   const datos = {
     titulo: $('c-titulo').value.trim(),
     lineas: listaDeTexto($('c-lineas').value),
-    fecha_inicio: $('c-inicio').value || null,
-    fecha_fin: $('c-sinfin').checked ? null : ($('c-fin').value || null),
+    fecha_inicio: aISO($('c-inicio').value) || null,
+    fecha_fin: $('c-sinfin').checked ? null : (aISO($('c-fin').value) || null),
     paradas_suspendidas: listaDeTexto($('c-paradas').value),
     observaciones: $('c-obs').value.trim() || null
   };
   if(!datos.titulo) return toast('Falta el título');
   if(!datos.lineas.length) return toast('Falta al menos una línea');
-  if(!datos.fecha_inicio) return toast('Falta la fecha de inicio');
+  if(!datos.fecha_inicio) return toast($('c-inicio').value ? 'La fecha de inicio no es válida (usá dd/mm/aaaa)' : 'Falta la fecha de inicio');
+  if(!$('c-sinfin').checked && $('c-fin').value && !datos.fecha_fin) return toast('La fecha de fin no es válida (usá dd/mm/aaaa)');
   if(!datos.fecha_fin && !$('c-sinfin').checked) return toast('Falta la fecha de fin (o marcá "sin fecha de fin")');
   if(datos.fecha_fin && datos.fecha_fin < datos.fecha_inicio) return toast('La fecha de fin es anterior a la de inicio');
 
@@ -847,7 +856,7 @@ document.addEventListener('click', (e) => {
   if(t.dataset.borrar) return borrar(t.dataset.borrar);
   if(t.hasAttribute('data-cerrar')) return cerrarTodo();
   if(t.dataset.ver){ e.stopPropagation(); return verDetalle(t.dataset.ver); }
-  if(t.dataset.dia){ $('f-fecha').value = t.dataset.dia; $('f-linea').value=''; $('f-texto').value=''; $('f-estado').value=''; renderListado(); irA('listado'); }
+  if(t.dataset.dia){ $('f-fecha').value = aTexto(t.dataset.dia); $('f-linea').value=''; $('f-texto').value=''; $('f-estado').value=''; renderListado(); irA('listado'); }
 });
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => irA(b.dataset.tab));
 $('mes-ant').onclick = () => { S.mes.setMonth(S.mes.getMonth()-1); renderCalendario(); };
@@ -870,6 +879,13 @@ drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add(
 drop.addEventListener('dragleave', () => drop.classList.remove('sobre'));
 drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('sobre'); procesarArchivo(e.dataTransfer.files[0]); });
 document.addEventListener('keydown', e => { if(e.key==='Escape') cerrarTodo(); });
+document.querySelectorAll('input.fecha').forEach(inp => inp.addEventListener('input', (e) => {
+  if(e.inputType && e.inputType.startsWith('delete')) return;
+  let d = inp.value.replace(/\D/g,'').slice(0,8);
+  if(d.length > 4) d = d.slice(0,2)+'/'+d.slice(2,4)+'/'+d.slice(4);
+  else if(d.length > 2) d = d.slice(0,2)+'/'+d.slice(2);
+  inp.value = d;
+}));
 
 sb.auth.onAuthStateChange((_ev, session) => { S.user = session?.user || null; actualizarUsuario(); });
 (async () => {

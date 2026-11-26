@@ -65,7 +65,7 @@
   .cal .dia.hoy .num{background:var(--gold);color:#1f2937;border-radius:10px;padding:0 6px}
   .cal .num{font-size:12px;font-weight:600;display:inline-block;margin-bottom:3px}
   .ev{font-size:11px;color:#fff;border-radius:3px;padding:1px 5px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ev.fin{outline:2px solid var(--rojo);outline-offset:-2px}
+  .ev.fin::before{content:'FIN';background:#fff;color:#111;font-size:9px;font-weight:700;border-radius:2px;padding:0 3px;margin-right:4px}
   .mas{font-size:11px;color:var(--muted)}
   /* Listado */
   .filtros{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
@@ -144,7 +144,7 @@
       <h2 id="mes-titulo"></h2>
       <button class="btn-sec btn-chico" id="mes-sig">›</button>
       <button class="btn-sec btn-chico" id="mes-hoy">Hoy</button>
-      <span class="muted peq" style="margin-left:auto">Clic en un día para ver qué líneas estaban desviando. Borde rojo = último día del desvío.</span>
+      <span class="muted peq" style="margin-left:auto">Clic en un día para ver qué líneas estaban desviando. Cada color es un desvío distinto; <b>FIN</b> = último día.</span>
     </div>
     <div class="cal" id="cal"></div>
   </section>
@@ -607,8 +607,22 @@ function aISO(t){
 }
 const normLinea = (s) => String(s).toUpperCase().replace(/\s+/g,'');
 const listaDeTexto = (s) => s.split(/[,;\n]+/).map(x=>x.trim()).filter(Boolean);
-const COLORES = ['#003580','#0b7a75','#7c3aed','#c2410c','#be123c','#15803d','#1d4ed8','#a16207','#0e7490','#9d174d'];
-const colorDe = (id) => { let h=0; for(const c of id) h = (h*31 + c.charCodeAt(0)) >>> 0; return COLORES[h % COLORES.length]; };
+// Colores bien distintos entre sí; dos desvíos que coinciden en días nunca comparten color
+const COLORES = ['#003580','#0b7a75','#7c3aed','#c2410c','#be123c','#15803d','#0e7490','#a16207','#4b5563','#db2777'];
+let COLOR_ASIG = {};
+function asignarColores(){
+  COLOR_ASIG = {};
+  const orden = [...S.desvios].sort((a,b) => a.fecha_inicio < b.fecha_inicio ? -1 : a.fecha_inicio > b.fecha_inicio ? 1 : (a.id < b.id ? -1 : 1));
+  const activos = [];   // {fin, color}
+  for(const d of orden){
+    for(let i = activos.length-1; i >= 0; i--) if(activos[i].fin < d.fecha_inicio) activos.splice(i,1);
+    const usados = new Set(activos.map(a => a.color));
+    let c = 0; while(usados.has(c) && c < COLORES.length-1) c++;
+    COLOR_ASIG[d.id] = c;
+    activos.push({fin: d.fecha_fin || '9999-12-31', color: c});
+  }
+}
+const colorDe = (id) => COLORES[(COLOR_ASIG[id] ?? 0) % COLORES.length];
 function proxHabil(hoy){ const dow = deISO(hoy).getDay(); return sumarDias(hoy, dow===5?3 : dow===6?2 : 1); }
 function toast(msg, ms=2600){ const t=$('toast'); t.textContent=msg; t.style.display='block'; clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', ms); }
 
@@ -636,7 +650,7 @@ async function cargar(){
   render();
 }
 
-function render(){ renderAlertas(); renderCalendario(); renderListado(); }
+function render(){ asignarColores(); renderAlertas(); renderCalendario(); renderListado(); }
 
 /* ===================== Alertas ===================== */
 function renderAlertas(){

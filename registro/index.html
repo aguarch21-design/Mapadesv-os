@@ -6,6 +6,8 @@
 <title>Registro de Desvíos · UPTU</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
   :root{
     --navy:#003580; --navy-2:#0a4aa8; --gold:#f5a800; --bg:#f4f6fa; --card:#fff;
@@ -104,6 +106,15 @@
   .modal dt{font-size:12px;color:var(--muted);font-weight:600}
   .modal dd{margin:0}
   .modal .pie{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  .mapa{height:300px;border:1px solid var(--line);border-radius:8px;margin-top:14px;background:#f6f6f2;z-index:0}
+  #mapa-general{height:65vh;min-height:380px;margin-top:0}
+  .mapa-estado{font-size:12px;color:var(--muted);margin-top:6px}
+  .mapa-top{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px}
+  .mapa-top label{display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:3px}
+  .ley{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#374151;margin-top:8px}
+  .ley i{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:5px;vertical-align:-2px}
+  .ley i.linea{width:18px;height:5px;border-radius:2px;vertical-align:2px}
+  .leaflet-popup-content{font-size:13px;line-height:1.35}
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;z-index:60;display:none}
   .oculto{display:none!important}
   @media (max-width:720px){
@@ -131,6 +142,7 @@
 <nav>
   <button data-tab="calendario" class="activo">Calendario</button>
   <button data-tab="listado">Buscar / Reclamos</button>
+  <button data-tab="mapa">Mapa</button>
   <button data-tab="cargar">Cargar comunicado</button>
 </nav>
 
@@ -147,6 +159,23 @@
       <span class="muted peq" style="margin-left:auto">Clic en un día para ver qué líneas estaban desviando. Cada color es un desvío distinto; <b>FIN</b> = último día.</span>
     </div>
     <div class="cal" id="cal"></div>
+  </section>
+
+  <!-- MAPA -->
+  <section id="tab-mapa" class="card oculto">
+    <div class="mapa-top">
+      <label>Desvíos activos el día<input id="m-fecha" class="fecha" placeholder="dd/mm/aaaa" inputmode="numeric" maxlength="10" style="width:120px"></label>
+      <label>Línea (opcional)<input id="m-linea" placeholder="Ej. 121" style="width:100px"></label>
+      <button class="btn-sec" id="m-hoy">Hoy</button>
+      <span class="muted peq" id="m-estado" style="margin-left:auto"></span>
+    </div>
+    <div id="mapa-general" class="mapa"></div>
+    <div class="ley">
+      <span><i class="linea" style="background:#b91c1c"></i>Tramo cortado (calle principal)</span>
+      <span><i style="background:#b91c1c;border:2px solid #fff;box-shadow:0 0 0 1px #b91c1c"></i>Parada suspendida</span>
+      <span><i class="linea" style="background:#f59e0b"></i>Paradas suspendidas en un tramo</span>
+      <span class="muted">Clic en cada elemento para ver el detalle.</span>
+    </div>
   </section>
 
   <!-- LISTADO / RECLAMOS -->
@@ -199,6 +228,9 @@
         <div class="campo full"><label>Paradas suspendidas</label><input id="c-paradas" placeholder="Ej. 2345, 2346 — o — Herrera y Reissig esq. Ibiray, …">
           <span class="ayuda">Número de parada o esquina, separadas por coma. Son las que hay que levantar cuando finalice el desvío.</span></div>
         <div class="campo full"><label>Observaciones</label><textarea id="c-obs" rows="4" placeholder="Recorrido alternativo, paradas provisorias, detalle de paradas…"></textarea></div>
+        <div class="campo full"><label>Ubicación en el mapa</label>
+          <div id="c-mapa" class="mapa" style="height:260px;margin-top:0"></div>
+          <span class="ayuda" id="c-mapa-estado">Aparece solo al subir el comunicado: calle cortada en rojo y paradas suspendidas.</span></div>
       </div>
       <div class="acciones">
         <button class="btn-sec" id="c-cancelar">Cancelar</button>
@@ -211,7 +243,7 @@
 <!-- Modal detalle -->
 <div class="modal-fondo" id="m-detalle"><div class="modal">
   <div class="cab"><h3 id="d-titulo"></h3><button data-cerrar>×</button></div>
-  <div class="cuerpo"><dl id="d-dl"></dl></div>
+  <div class="cuerpo"><dl id="d-dl"></dl><div id="d-mapa" class="mapa"></div><div class="mapa-estado" id="d-mapa-estado"></div></div>
   <div class="pie" id="d-pie"></div>
 </div></div>
 
@@ -765,6 +797,7 @@ function verDetalle(id){
   pie += `<button class="btn" data-cerrar>Cerrar</button>`;
   $('d-pie').innerHTML = pie;
   abrir('m-detalle');
+  mostrarMapaDetalle(d);
 }
 
 async function levantarParadas(id){
@@ -787,7 +820,9 @@ async function borrar(id){
 
 /* ===================== Formulario ===================== */
 function limpiarForm(){
-  S.editando = null; S.archivo = null;
+  S.editando = null; S.archivo = null; S.geoPrevio = null;
+  if(window.CAPA_FORM) CAPA_FORM.clearLayers();
+  if($('c-mapa-estado')) $('c-mapa-estado').textContent = 'Aparece solo al subir el comunicado: calle cortada en rojo y paradas suspendidas.';
   ['c-titulo','c-lineas','c-inicio','c-fin','c-paradas','c-obs'].forEach(i => $(i).value = '');
   $('c-sinfin').checked = false; $('c-fin').disabled = false;
   $('archivo').value = '';
@@ -813,6 +848,7 @@ function editar(id){
     ? `<b>Comunicado actual:</b> ${esc(d.pdf_nombre||'PDF')}<br><span class="muted peq">Si llegó un comunicado nuevo (por ejemplo una prórroga), arrastralo acá para reemplazarlo.</span>`
     : `<b>Arrastrá el PDF del comunicado acá</b> o hacé clic para elegirlo.`;
   irA('cargar');
+  previsualizarMapa();
 }
 
 async function procesarArchivo(file){
@@ -831,6 +867,7 @@ async function procesarArchivo(file){
     else if(r.fin){ $('c-fin').value = aTexto(r.fin); $('c-sinfin').checked=false; $('c-fin').disabled=false; }
     if(r.paradas.length) completar('c-paradas', r.paradas.join(', '));
     if(r.detalleParadas && !$('c-obs').value) $('c-obs').value = r.detalleParadas;
+    previsualizarMapa();
     const faltan = [];
     if(!r.lineas.length) faltan.push('líneas');
     if(!r.inicio) faltan.push('fecha de inicio');
@@ -856,7 +893,8 @@ async function guardar(){
     fecha_inicio: aISO($('c-inicio').value) || null,
     fecha_fin: $('c-sinfin').checked ? null : (aISO($('c-fin').value) || null),
     paradas_suspendidas: listaDeTexto($('c-paradas').value),
-    observaciones: $('c-obs').value.trim() || null
+    observaciones: $('c-obs').value.trim() || null,
+    geo: (S.geoPrevio && S.geoPrevio.clave === claveMapaForm()) ? S.geoPrevio.geo : null   // lo ubicado en la vista previa
   };
   if(!datos.titulo) return toast('Falta el título');
   if(!datos.lineas.length) return toast('Falta al menos una línea');
@@ -933,10 +971,277 @@ function exportarICS(){
   setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
 }
 
+
+/* ===================== MAPA =====================
+   Ubica paradas y tramos con las capas públicas del geoserver de la IM
+   (cruces de calles y paradas STM), que funcionan desde la red de la IM. */
+const GEO_IM = 'https://montevideo.gub.uy/app/geoserver';
+const CENTRO_MVD = [-34.885, -56.165];
+let PREF_BASE = 'osm';
+try { PREF_BASE = localStorage.getItem('rd_base') || 'osm'; } catch(e) {}
+
+function crearMapa(div){
+  const mapa = L.map(div, { zoomControl:true, attributionControl:true }).setView(CENTRO_MVD, 13);
+  const osm  = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'© OpenStreetMap' });
+  const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom:19, attribution:'Esri' });
+  const im   = L.layerGroup([
+    L.tileLayer.wms(GEO_IM + '/wms', { layers:'mapstore-base:cb_v_sig_vias', format:'image/png', transparent:true, maxZoom:20, attribution:'Intendencia de Montevideo' }),
+    L.tileLayer.wms(GEO_IM + '/wms', { layers:'mapstore-base:cb_v_sig_vias_etiquetas', format:'image/png', transparent:true, maxZoom:20 })
+  ]);
+  const bases = { 'OpenStreetMap': osm, 'Esri': esri, 'MonteviMap (IM)': im };
+  const inicial = PREF_BASE === 'im' ? im : PREF_BASE === 'esri' ? esri : osm;
+  inicial.addTo(mapa);
+  L.control.layers(bases, null, { position:'topright' }).addTo(mapa);
+  mapa.on('baselayerchange', e => {
+    PREF_BASE = e.layer === im ? 'im' : e.layer === esri ? 'esri' : 'osm';
+    try { localStorage.setItem('rd_base', PREF_BASE); } catch(err) {}
+  });
+  // Si la red bloquea OpenStreetMap/Esri (red de la IM), pasar solo a MonteviMap
+  if(inicial !== im){
+    let ok = 0, err = 0;
+    inicial.on('tileload', () => ok++);
+    inicial.on('tileerror', () => {
+      err++;
+      if(err >= 3 && ok === 0 && mapa.hasLayer(inicial)){
+        mapa.removeLayer(inicial); im.addTo(mapa);
+        PREF_BASE = 'im'; try { localStorage.setItem('rd_base','im'); } catch(e) {}
+        toast('Este mapa está bloqueado en la red; se usa el de MonteviMap (IM)');
+      }
+    });
+  }
+  return mapa;
+}
+
+// "Av. Gral. San Martín" → '%MART_N%' (patrón para ILIKE, tolera tildes y abreviaturas)
+const PALABRAS_VACIAS = /^(AV|AVDA|AVENIDA|BV|BVAR|BLVR|BR|BULEVAR|DR|DRA|GRAL|GENERAL|CNO|CAMINO|PSJE|PJE|PASAJE|ING|PROF|CNEL|TTE|PTE|STA|STO|DE|DEL|LA|LAS|LOS|EL|Y|E|ESQ|ESQUINA|CALLE|RBLA|RAMBLA|PZA|PLAZA|MTRO|MAESTRO)$/;
+function patronCalle(nombre){
+  const toks = String(nombre||'').toUpperCase().replace(/SEPTIEMBRE/g,'SETIEMBRE')
+    .split(/[\s.,'"“”()\/]+/).filter(Boolean)
+    .filter(t => !PALABRAS_VACIAS.test(t))
+    .filter(t => t.length > 1 || /\d/.test(t))
+    .map(t => t.replace(/[ÁÉÍÓÚÜÑ]/g,'_').replace(/[^A-Z0-9_]/g,''))
+    .filter(Boolean);
+  return toks.length ? '%' + toks.join('%') + '%' : null;
+}
+const sinTildes = (s) => String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+
+async function wfs(capa, cql, max=30){
+  const url = `${GEO_IM}/wfs?service=WFS&version=1.0.0&request=GetFeature&typeName=${capa}&outputFormat=application/json&srsName=EPSG:4326&maxFeatures=${max}&CQL_FILTER=${encodeURIComponent(cql)}`;
+  const r = await fetch(url);
+  if(!r.ok) throw new Error('geoserver ' + r.status);
+  return (await r.json()).features || [];
+}
+
+const CACHE_CRUCES = {};
+async function buscarCruce(a, b){
+  const pa = patronCalle(a), pb = patronCalle(b);
+  if(!pa || !pb) return [];
+  const clave = pa + '|' + pb;
+  if(CACHE_CRUCES[clave]) return CACHE_CRUCES[clave];
+  const feats = await wfs('mapstore-base:cb_v_sig_cruces_montevideo',
+    `nom_calle_ini ILIKE '${pa}' AND nom_calle_fin ILIKE '${pb}'`);
+  const vistos = new Map();
+  for(const f of feats){
+    const [lng, lat] = f.geometry.coordinates;
+    const k = lat.toFixed(4) + ',' + lng.toFixed(4);
+    if(vistos.has(k)) continue;
+    // más puntaje si el nombre coincide exacto
+    const p = f.properties, A = sinTildes(a).replace(/^(AV|BV|BR|DR|GRAL)\.?\s+/,''), B = sinTildes(b).replace(/^(AV|BV|BR|DR|GRAL)\.?\s+/,'');
+    const puntaje = (sinTildes(p.nom_calle_ini).endsWith(A) ? 1 : 0) + (sinTildes(p.nom_calle_fin).endsWith(B) ? 1 : 0);
+    vistos.set(k, { ll:[lat, lng], puntaje, nombre: p.cruce });
+  }
+  const lista = [...vistos.values()].sort((x,y) => y.puntaje - x.puntaje);
+  CACHE_CRUCES[clave] = lista;
+  return lista;
+}
+
+async function buscarParadaPorCodigo(cod){
+  const feats = await wfs('mapstore-tematicas:vyt_v_uptu_ubic_paradas_con_horarios', `cod_ubic_parada = ${parseInt(cod,10)}`, 3);
+  return feats.map(f => ({ ll:[f.geometry.coordinates[1], f.geometry.coordinates[0]], puntaje:2, nombre: `Parada ${cod} – ${f.properties.desc_ubic_parada}` }));
+}
+
+// Interpreta un texto de parada: número, "X esq. Y", "X y Y", "X entre A y B"
+async function candidatosParada(texto){
+  const t = String(texto).trim();
+  const cod = t.match(/^(?:parada\s*)?(?:n[º°o]\.?\s*)?(\d{3,5})\b/i);
+  if(cod){
+    try { const r = await buscarParadaPorCodigo(cod[1]); if(r.length) return { tipo:'punto', opciones:[r] }; } catch(e) {}
+  }
+  const limpio = t.replace(/^\d{3,5}\s*[-–]?\s*/, '');
+  const entre = limpio.match(/^(.+?)\s+entre\s+(.+?)\s+(?:y|e|-|\/\/)\s+(.+)$/i);
+  if(entre){
+    const [x, y] = await Promise.all([buscarCruce(entre[1], entre[2]), buscarCruce(entre[1], entre[3])]);
+    if(x.length && y.length) return { tipo:'tramo', opciones:[x, y] };
+  }
+  const esq = limpio.match(/^(.+?)\s+(?:esq(?:uina)?\.?|esquina\s+con)\s+(.+)$/i);
+  if(esq){
+    const r = await buscarCruce(esq[1], esq[2]);
+    if(r.length) return { tipo:'punto', opciones:[r] };
+  }
+  // "CANELONES y CARLOS QUIJANO" (puede haber "y" dentro de un nombre: probar cada una)
+  const ys = [...limpio.matchAll(/\s+y\s+/gi)];
+  for(const m of ys){
+    const r = await buscarCruce(limpio.slice(0, m.index), limpio.slice(m.index + m[0].length));
+    if(r.length) return { tipo:'punto', opciones:[r] };
+  }
+  return null;
+}
+
+const dist2 = (a, b) => (a[0]-b[0])**2 + (a[1]-b[1])**2;
+
+// Ubica todo lo de un desvío. Devuelve { zona, paradas:[{texto,tipo,coords}], sinUbicar:[] }
+async function geocodificarDesvio(d){
+  const items = [];   // { texto, tipo, opciones:[[cands],[cands]?], esZona }
+  const t = d.titulo.match(/^(.+?)\s*\((.+?)\)/);
+  if(t){
+    const partes = t[2].split(/\s*(?:\/\/|\s-\s|–|\s+y\s+)\s*/).filter(Boolean);
+    if(partes.length === 2){
+      try {
+        const [x, y] = await Promise.all([buscarCruce(t[1], partes[0]), buscarCruce(t[1], partes[1])]);
+        if(x.length && y.length) items.push({ texto: t[1].trim() + ' entre ' + partes.join(' y '), tipo:'tramo', opciones:[x, y], esZona:true });
+      } catch(e) {}
+    }
+  }
+  const sinUbicar = [];
+  for(const p of (d.paradas_suspendidas || [])){
+    try {
+      const c = await candidatosParada(p);
+      if(c) items.push({ texto:p, ...c }); else sinUbicar.push(p);
+    } catch(e) { sinUbicar.push(p); }
+  }
+  // Si un nombre aparece en varios lugares de la ciudad, elegir el más cercano al resto del desvío
+  const fijos = items.flatMap(it => it.opciones.filter(o => o.length === 1).map(o => o[0].ll));
+  let ref = fijos.length ? [fijos.reduce((s,p)=>s+p[0],0)/fijos.length, fijos.reduce((s,p)=>s+p[1],0)/fijos.length] : null;
+  if(!ref && items.length){
+    const o = items[0].opciones[0]; ref = o[0].ll;
+  }
+  const res = { v:1, zona:null, paradas:[], sinUbicar };
+  for(const it of items){
+    const coords = it.opciones.map(o => (o.length === 1 || !ref) ? o[0].ll : o.reduce((best, c) => dist2(c.ll, ref) < dist2(best.ll, ref) ? c : best).ll);
+    if(it.esZona) res.zona = { texto: it.texto, coords };
+    else res.paradas.push({ texto: it.texto, tipo: it.tipo, coords });
+  }
+  return res;
+}
+
+async function geoDe(d){
+  if(d.geo && d.geo.v === 1) return d.geo;
+  const g = await geocodificarDesvio(d);
+  d.geo = g;
+  // Guardar para la próxima (solo usuarios con permiso de edición)
+  if(S.user && (g.zona || g.paradas.length)) sb.from(CONFIG.TABLA).update({ geo: g }).eq('id', d.id).then(() => {});
+  return g;
+}
+
+function dibujarDesvio(capa, d, g, color, conPopup=true){
+  const pop = `<b>${esc(d.titulo)}</b><br>Líneas ${esc((d.lineas||[]).join(', '))}<br>` +
+              `Del ${fmt(d.fecha_inicio)} al ${d.fecha_fin ? fmt(d.fecha_fin) : 'nuevo aviso'}`;
+  const capas = [];
+  if(g.zona){
+    capas.push(L.polyline(g.zona.coords, { color:'#b91c1c', weight:7, opacity:.75 })
+      .bindPopup(pop + `<br><i>Tramo cortado: ${esc(g.zona.texto)}</i>`));
+    if(color) capas.push(L.polyline(g.zona.coords, { color, weight:2, opacity:1, dashArray:'4 4' }));
+  }
+  for(const p of g.paradas){
+    if(p.tipo === 'tramo'){
+      capas.push(L.polyline(p.coords, { color:'#f59e0b', weight:6, opacity:.85 })
+        .bindPopup(pop + `<br><b>Paradas suspendidas:</b> ${esc(p.texto)}`));
+    } else {
+      capas.push(L.circleMarker(p.coords[0], { radius:8, color:'#fff', weight:2, fillColor:color || '#b91c1c', fillOpacity:1 })
+        .bindTooltip(esc(p.texto)).bindPopup(pop + `<br><b>Parada suspendida:</b> ${esc(p.texto)}`));
+      capas.push(L.circleMarker(p.coords[0], { radius:3, stroke:false, fillColor:'#fff', fillOpacity:1, interactive:false }));
+    }
+  }
+  capas.forEach(c => c.addTo(capa));
+  return capas;
+}
+
+let MAPA_DET = null, CAPA_DET = null;
+async function mostrarMapaDetalle(d){
+  const est = $('d-mapa-estado');
+  if(!window.L){ $('d-mapa').style.display='none'; est.textContent=''; return; }
+  $('d-mapa').style.display = '';
+  if(!MAPA_DET){ MAPA_DET = crearMapa('d-mapa'); CAPA_DET = L.layerGroup().addTo(MAPA_DET); }
+  CAPA_DET.clearLayers();
+  setTimeout(() => MAPA_DET.invalidateSize(), 60);
+  MAPA_DET.setView(CENTRO_MVD, 13);
+  est.textContent = 'Ubicando en el mapa…';
+  try{
+    const g = await geoDe(d);
+    if($('d-titulo').textContent !== d.titulo) return;   // se abrió otro desvío mientras tanto
+    const capas = dibujarDesvio(CAPA_DET, d, g, null);
+    if(capas.length) MAPA_DET.fitBounds(L.featureGroup(capas).getBounds().pad(0.35), { maxZoom:17 });
+    est.textContent = !capas.length ? 'No se pudo ubicar este desvío en el mapa (no tiene calle o paradas reconocibles).'
+      : g.sinUbicar.length ? `No se ubicó: ${g.sinUbicar.join(' · ')}` : '';
+  }catch(e){
+    console.error(e); est.textContent = 'No se pudo consultar el mapa de la IM en este momento.';
+  }
+}
+
+// Vista previa en el formulario de carga
+var MAPA_FORM = null, CAPA_FORM = null; let FORM_TOKEN = 0;
+const claveMapaForm = () => $('c-titulo').value.trim() + '|' + listaDeTexto($('c-paradas').value).join('|');
+async function previsualizarMapa(){
+  if(!window.L) return;
+  if(!MAPA_FORM){ MAPA_FORM = crearMapa('c-mapa'); CAPA_FORM = L.layerGroup().addTo(MAPA_FORM); window.CAPA_FORM = CAPA_FORM; }
+  setTimeout(() => MAPA_FORM.invalidateSize(), 60);
+  const clave = claveMapaForm();
+  const d = { id:'previa', titulo: $('c-titulo').value.trim(), lineas: listaDeTexto($('c-lineas').value),
+              fecha_inicio: aISO($('c-inicio').value) || hoyISO(), fecha_fin: aISO($('c-fin').value) || null,
+              paradas_suspendidas: listaDeTexto($('c-paradas').value) };
+  CAPA_FORM.clearLayers();
+  if(!d.titulo && !d.paradas_suspendidas.length){ $('c-mapa-estado').textContent = 'Aparece solo al subir el comunicado: calle cortada en rojo y paradas suspendidas.'; return; }
+  const token = ++FORM_TOKEN;
+  $('c-mapa-estado').textContent = 'Ubicando en el mapa…';
+  try{
+    const g = await geocodificarDesvio(d);
+    if(token !== FORM_TOKEN) return;
+    S.geoPrevio = { clave, geo: g };
+    const capas = dibujarDesvio(CAPA_FORM, d, g, null);
+    if(capas.length) MAPA_FORM.fitBounds(L.featureGroup(capas).getBounds().pad(0.35), { maxZoom:17 });
+    $('c-mapa-estado').textContent = !capas.length
+      ? 'No se pudo ubicar en el mapa. Revisá que la calle del título y las paradas estén escritas como "Calle esq. Calle".'
+      : g.sinUbicar.length ? `Ubicado. No se encontró: ${g.sinUbicar.join(' · ')}` : 'Ubicado. Si algo quedó mal, corregí el texto de la parada y se actualiza solo.';
+  }catch(e){
+    if(token === FORM_TOKEN) $('c-mapa-estado').textContent = 'No se pudo consultar el mapa de la IM en este momento (se puede guardar igual).';
+  }
+}
+
+let MAPA_GEN = null, CAPA_GEN = null, GEN_TOKEN = 0;
+async function mostrarMapaGeneral(){
+  if(!window.L) { $('m-estado').textContent = 'No se pudo cargar el mapa.'; return; }
+  if(!$('m-fecha').value) $('m-fecha').value = aTexto(hoyISO());
+  if(!MAPA_GEN){ MAPA_GEN = crearMapa('mapa-general'); CAPA_GEN = L.layerGroup().addTo(MAPA_GEN); }
+  setTimeout(() => MAPA_GEN.invalidateSize(), 60);
+  const dia = aISO($('m-fecha').value) || hoyISO();
+  const fl = normLinea($('m-linea').value.trim());
+  const lista = S.desvios.filter(d => activoEn(d, dia) && (!fl || (d.lineas||[]).some(l => normLinea(l) === fl)));
+  const token = ++GEN_TOKEN;
+  CAPA_GEN.clearLayers();
+  const todas = [];
+  let sinMapa = 0;
+  for(let i=0;i<lista.length;i++){
+    $('m-estado').textContent = `Ubicando ${i+1} de ${lista.length}…`;
+    try{
+      const g = await geoDe(lista[i]);
+      if(token !== GEN_TOKEN) return;
+      const capas = dibujarDesvio(CAPA_GEN, lista[i], g, colorDe(lista[i].id));
+      if(!capas.length) sinMapa++;
+      todas.push(...capas);
+    }catch(e){ sinMapa++; }
+  }
+  if(token !== GEN_TOKEN) return;
+  if(todas.length) MAPA_GEN.fitBounds(L.featureGroup(todas).getBounds().pad(0.15), { maxZoom:16 });
+  $('m-estado').textContent = !lista.length ? `No hay desvíos activos el ${fmt(dia)}.`
+    : `${lista.length} desvío${lista.length>1?'s':''} activo${lista.length>1?'s':''} el ${fmt(dia)}` + (sinMapa ? ` · ${sinMapa} sin ubicación en el mapa` : '');
+}
+
 /* ===================== Navegación, modales, login ===================== */
 function irA(tab){
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('activo', b.dataset.tab===tab));
-  ['calendario','listado','cargar'].forEach(t => $('tab-'+t).classList.toggle('oculto', t!==tab));
+  ['calendario','listado','mapa','cargar'].forEach(t => $('tab-'+t).classList.toggle('oculto', t!==tab));
+  if(tab === 'mapa') mostrarMapaGeneral();
+  if(tab === 'cargar' && MAPA_FORM) setTimeout(() => MAPA_FORM.invalidateSize(), 60);
 }
 function abrir(id){ $(id).classList.add('abierto'); }
 function cerrarTodo(){ document.querySelectorAll('.modal-fondo').forEach(m=>m.classList.remove('abierto')); }
@@ -974,6 +1279,10 @@ $('mes-hoy').onclick = () => { S.mes = new Date(); S.mes.setDate(1); renderCalen
 ['f-linea','f-fecha','f-texto','f-estado'].forEach(id => $(id).addEventListener('input', renderListado));
 $('f-limpiar').onclick = () => { ['f-linea','f-fecha','f-texto','f-estado'].forEach(id => $(id).value=''); renderListado(); };
 $('btn-ics').onclick = exportarICS;
+let _cMap; ['c-titulo','c-paradas'].forEach(id => $(id).addEventListener('input', () => { clearTimeout(_cMap); _cMap = setTimeout(previsualizarMapa, 900); }));
+$('m-hoy').onclick = () => { $('m-fecha').value = aTexto(hoyISO()); mostrarMapaGeneral(); };
+$('m-fecha').addEventListener('input', () => { if(aISO($('m-fecha').value)) mostrarMapaGeneral(); });
+let _mLin; $('m-linea').addEventListener('input', () => { clearTimeout(_mLin); _mLin = setTimeout(mostrarMapaGeneral, 400); });
 $('btn-login').onclick = async () => { if(S.user){ await sb.auth.signOut(); toast('Sesión cerrada'); } else abrir('m-login'); };
 $('link-login').onclick = (e) => { e.preventDefault(); abrir('m-login'); };
 $('l-entrar').onclick = entrar;

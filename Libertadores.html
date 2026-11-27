@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Desvíos Final Libertadores</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+/* VOICE: aviso de servicio de la IM, claro y rápido de leer en la calle
+   IDEA: el cartel de parada / comunicado de desvío, misma familia que la página de la visita del Papa
+   PICTURE: el buscador con forma de cartel y el mapa de paradas
+   COLOUR: gris claro, tinta oscura, dorado IM; rojo suspendida
+   LAYOUT: una columna para celular */
+:root{--bg:#F2F6F1;--surface:#FFFFFF;--surface-2:#E3ECE3;--ink:#0F1F17;--ink-muted:#4F6157;--accent:#1B7A4B;--accent-ink:#145C38;--line:#D3E0D5;--warn-bg:#FFF7DC;--warn-ink:#6B5200;--warn-line:#EBD27A;--sign-bg:#0E3B2A;--sign-ink:#D7F25A;--time-bg:#E4F2E9;--time-ink:#145C38;--stop:#D0342C;--prov:#1E7F4F;
+--f-display:'Big Shoulders Display',Impact,'Arial Narrow',sans-serif;--f-body:'IBM Plex Sans',system-ui,-apple-system,sans-serif;--f-mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;color-scheme:light}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0B1712;--surface:#12211A;--surface-2:#1A2E24;--ink:#E9F2EC;--ink-muted:#9DB3A6;--accent:#4FC17F;--accent-ink:#8FE0B0;--line:#24392E;--warn-bg:#231E0C;--warn-ink:#EAD27E;--warn-line:#4A3F14;--sign-bg:#05140D;--time-bg:#163024;--time-ink:#8FE0B0;--stop:#FF5A4E;--prov:#45C98A;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0B1712;--surface:#12211A;--surface-2:#1A2E24;--ink:#E9F2EC;--ink-muted:#9DB3A6;--accent:#4FC17F;--accent-ink:#8FE0B0;--line:#24392E;--warn-bg:#231E0C;--warn-ink:#EAD27E;--warn-line:#4A3F14;--sign-bg:#05140D;--time-bg:#163024;--time-ink:#8FE0B0;--stop:#FF5A4E;--prov:#45C98A;color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+html{padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--f-body);overflow-x:clip}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.page{max-width:640px;margin:0 auto;padding:22px max(18px,env(safe-area-inset-right,0px)) 48px max(18px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:18px}
+.org{font:600 12px/1.4 var(--f-body);color:var(--ink-muted)}
+h1{font-family:var(--f-display);font-weight:800;font-size:clamp(28px,7vw,40px);line-height:1.02;margin:2px 0 0;text-wrap:balance}
+.rule{height:3px;width:96px;margin-top:8px;border-radius:2px;background:linear-gradient(90deg,var(--accent) 50%,var(--line) 50%)}
+.subtitle{color:var(--ink-muted);font-size:14px;line-height:1.55;margin-top:8px}
+.updated{font:500 12px/1.4 var(--f-mono);color:var(--ink-muted);margin-top:4px}
+.tag{display:inline-block;margin-left:6px;font:600 11px/1 var(--f-mono);color:var(--accent-ink);background:var(--surface-2);border:1px solid var(--line);border-radius:5px;padding:2px 5px;vertical-align:1px}
+
+.event-card,.group,.info-card,.map-card{background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.event-card{padding:16px 18px;display:flex;flex-direction:column;gap:11px}
+.event-row{display:flex;gap:12px;align-items:baseline}
+.event-label{font:600 11px/1.3 var(--f-mono);color:var(--ink-muted);min-width:84px;flex-shrink:0}
+.event-value{font-size:14.5px;font-weight:500;line-height:1.4}
+
+.search-wrap{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;padding-block:2px;background:var(--bg)}
+.search-sign{background:var(--sign-bg);border-radius:12px;padding:11px 14px;display:flex;align-items:center;gap:10px}
+.search-sign svg{flex-shrink:0;opacity:.7;color:var(--sign-ink)}
+.search-sign input{flex:1;background:transparent;border:none;outline:none;font:600 17px/1 var(--f-mono);color:var(--sign-ink);min-height:28px}
+.search-sign input::placeholder{color:color-mix(in srgb,var(--sign-ink) 55%,transparent);font-weight:500}
+.search-sign:focus-within{box-shadow:0 0 0 2px var(--accent)}
+.search-count{font:500 12px/1 var(--f-mono);color:var(--sign-ink);opacity:.8;white-space:nowrap}
+.quick{display:flex;flex-wrap:wrap;gap:6px}
+.quick button{appearance:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;min-height:36px;padding:6px 10px;font:800 15px/1 var(--f-display);letter-spacing:.02em;cursor:pointer}
+.quick button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.quick button:focus-visible,.to-map:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.stats-row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.stats{font:500 12px/1.4 var(--f-mono);color:var(--ink-muted)}
+.to-map{appearance:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;min-height:40px;padding:8px 11px;font:600 13px/1 var(--f-body);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+
+.groups{display:flex;flex-direction:column;gap:12px}
+.group{padding:14px 16px;display:flex;flex-direction:column;gap:11px}
+.group-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:800 16px/1 var(--f-display);background:var(--surface-2);border-radius:6px;padding:5px 9px;letter-spacing:.02em}
+.chip.match{background:var(--accent);color:var(--surface)}
+.time{flex-shrink:0;font:600 11px/1 var(--f-mono);color:var(--time-ink);background:var(--time-bg);border-radius:5px;padding:5px 7px;white-space:nowrap}
+.variants{display:flex;flex-direction:column;gap:10px}
+.variant-label{font:600 11px/1.3 var(--f-mono);color:var(--accent-ink)}
+.variant-text{font-size:14.5px;line-height:1.5}
+.alt{margin-top:5px;font-size:13px;line-height:1.45;color:var(--ink-muted);border-left:3px solid var(--warn-line);padding-left:8px}
+.alt b{color:var(--ink)}
+.empty{text-align:center;color:var(--ink-muted);font-size:14px;line-height:1.6;padding:36px 12px;border:1px dashed var(--line);border-radius:14px}
+
+.banner{background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:10px}
+.banner summary{cursor:pointer;list-style:none;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:44px}
+.banner summary::-webkit-details-marker{display:none}
+.banner summary::after{content:'Ver';font:600 12px/1 var(--f-body);color:var(--warn-ink);border:1px solid var(--warn-line);border-radius:6px;padding:5px 8px;flex-shrink:0}
+.banner[open] summary::after{content:'Cerrar'}
+.banner-title{font:700 13px/1.3 var(--f-body);color:var(--warn-ink)}
+.banner ul{margin:0;padding:0 14px 12px 32px;display:flex;flex-direction:column;gap:3px}
+.banner li{font-size:13.5px;line-height:1.5;color:var(--warn-ink)}
+.banner h3{margin:4px 14px 6px;font:600 11px/1.3 var(--f-mono);color:var(--warn-ink)}
+
+.info-card{padding:16px 18px;display:flex;flex-direction:column;gap:12px;margin:0}
+.info-row dt{font:600 11px/1.3 var(--f-mono);color:var(--ink-muted);margin-bottom:3px}
+.info-row dd{margin:0;font-size:13.5px;line-height:1.55}
+.info-row + .info-row{border-top:1px solid var(--line);padding-top:12px}
+
+.map-card{overflow:hidden;display:flex;flex-direction:column}
+.map-head{padding:14px 16px 10px;display:flex;flex-direction:column;gap:4px}
+.map-title{font:800 21px/1.1 var(--f-display);letter-spacing:.02em;margin:0}
+.map-cap{font-size:13px;line-height:1.45;color:var(--ink-muted)}
+.map-cap b{color:var(--ink)}
+#map{height:380px;width:100%;background:var(--surface-2)}
+.maplinks{display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px 0}.maplinks a{display:inline-flex;align-items:center;min-height:40px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;color:var(--accent-ink);font:600 13px/1 var(--f-body);text-decoration:none;background:var(--surface-2)}.maplinks a:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.map-fallback{padding:16px;font-size:13.5px;color:var(--ink-muted)}
+.legend{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 16px;font-size:12.5px;color:var(--ink-muted);border-top:1px solid var(--line)}
+.legend .item{display:inline-flex;align-items:center;gap:6px}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--stop);border:2px solid #fff;box-shadow:0 0 0 1px var(--stop);flex-shrink:0}
+.sw{width:22px;height:5px;border-radius:3px;background:var(--stop);opacity:.85}
+.st-ico{width:14px;height:14px;border-radius:4px;background:var(--accent);flex-shrink:0}
+.stops-list{border-top:1px solid var(--line)}
+.stops-list summary{cursor:pointer;padding:12px 16px;min-height:44px;font:600 13.5px/1.3 var(--f-body);color:var(--accent-ink)}
+.tramo{padding:4px 16px 12px;display:flex;flex-direction:column;gap:6px}
+.stop-row{display:flex;gap:10px;align-items:baseline;font-size:13.5px;line-height:1.4}
+.stop-row button{appearance:none;border:0;background:none;padding:0;color:var(--ink);text-align:left;font:inherit;cursor:pointer}
+.stop-row button:hover,.stop-row button:focus-visible{color:var(--accent-ink);text-decoration:underline}
+.stop-cod{font:600 11px/1.4 var(--f-mono);color:var(--ink-muted);flex-shrink:0;min-width:44px}
+.stop-lines{font:500 11.5px/1.4 var(--f-mono);color:var(--ink-muted)}
+.leaflet-popup-content{font-family:var(--f-body);font-size:13px;line-height:1.45;margin:10px 12px}
+.pop-n{font-weight:700;font-size:13.5px}
+.pop-m{font:600 11px/1.4 var(--f-mono);color:#B3261E;margin-top:3px}
+.pop-l{font:500 11.5px/1.45 var(--f-mono);color:#4F6157;margin-top:4px}
+.estadio{width:28px;height:28px;border-radius:50%;background:#1B7A4B;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);display:grid;place-items:center;color:#fff;font:800 13px/1 'Big Shoulders Display',Impact,sans-serif}
+footer{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:18px;font-size:12.5px;color:var(--ink-muted);line-height:1.65}
+@media (max-width:480px){.event-row{flex-direction:column;gap:2px}.event-label{min-width:0}.page{gap:14px;padding-block:16px 40px}#map{height:62vh;max-height:460px}}
+</style>
+</head><body>
+<div class="page">
+  <div>
+    <div class="org">Intendencia de Montevideo · UPTU</div>
+    <h1>Desvíos:<br>Final de la Copa Libertadores</h1>
+    <div class="rule"></div>
+    <div class="subtitle">Buscá tu línea para ver por dónde pasa el sábado. Si algo cambia, se actualiza en este mismo link.</div>
+    <div class="updated">Última actualización: 27/11/2026 18:00 <span class="tag">Comunicado UPTU · 16/11</span></div>
+  </div>
+
+  <div class="event-card">
+    <div class="event-row"><div class="event-label">Partido</div><div class="event-value">Palmeiras – Estudiantes · sábado 28 de noviembre, 17:00 · Estadio Centenario</div></div>
+    <div class="event-row"><div class="event-label">Desvíos</div><div class="event-value">Desde las 00:00 del sábado 28 hasta que termine el evento y se levante la zona de exclusión</div></div>
+    <div class="event-row"><div class="event-label">Sin servicio</div><div class="event-value">Av. Ricaldoni de Av. Manuel Albo a Av. Centenario (circunvalación al Parque Batlle, ambas sendas) y Luis Morquio de Br. Artigas a Ricaldoni</div></div>
+  </div>
+
+  <div class="search-wrap">
+    <div class="search-sign">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="search" type="text" inputmode="search" placeholder="Buscá tu línea (ej: 185)" autocomplete="off" aria-label="Buscar línea o calle">
+      <span class="search-count" id="search-count"></span>
+    </div>
+  </div>
+  <div class="quick" id="quick" aria-label="Líneas con desvío"></div>
+  <div class="stats-row"><div class="stats" id="stats"></div><button class="to-map" id="to-map" type="button"><span class="dot"></span>Ver mapa</button></div>
+
+  <div class="groups" id="groups"></div>
+  <div class="empty" id="empty" hidden></div>
+
+  <details class="banner" id="banner">
+    <summary><span class="banner-title">Zona de exclusión y calles cortadas</span></summary>
+    <ul>
+      <li>Zona de exclusión: Av. Ricaldoni de Av. Manuel Albo a Av. Centenario, en ambas sendas</li>
+      <li>Luis Morquio de Br. Artigas a Ricaldoni</li>
+      <li>Av. Italia (senda sur) cortada entre Ricaldoni y Av. Centenario</li>
+      <li>Av. Centenario cortada desde Brito Foresti hasta Av. Italia, el sábado de 7:00 a 17:00</li>
+      <li>Prohibido estacionar en L. A. de Herrera entre José Mazzini y Comodoro Coe (acera oeste)</li>
+    </ul>
+    <h3>Cruces cortados al tránsito</h3>
+    <ul id="cortes"></ul>
+  </details>
+
+  <section class="map-card" aria-labelledby="map-title">
+    <div class="map-head">
+      <h2 class="map-title" id="map-title">Paradas sin servicio</h2>
+      <div class="map-cap" id="map-cap"></div>
+    </div>
+    <div id="map" role="region" aria-label="Mapa de paradas sin servicio"></div>
+    <div class="map-fallback" id="map-fallback" hidden>El mapa no se pudo cargar en esta conexión. Abajo está la lista de paradas.</div>
+    <div class="maplinks"><a href="https://www.openstreetmap.org/?mlat=-34.8945&amp;mlon=-56.1528#map=16/-34.8935/-56.1535" target="_blank" rel="noopener">Ver la zona en OpenStreetMap</a><a href="https://www.google.com/maps/@-34.8935,-56.1535,16z" target="_blank" rel="noopener">Ver en Google Maps</a></div>
+    <div class="legend"><span class="item"><span class="dot"></span>Parada sin servicio</span><span class="item"><span class="sw"></span>Ricaldoni (zona de exclusión)</span><span class="item"><span class="st-ico"></span>Estadio</span></div>
+    <details class="stops-list">
+      <summary id="stops-sum">Ver la lista de paradas</summary>
+      <div id="stops-body"></div>
+    </details>
+  </section>
+
+  <dl class="info-card">
+    <div class="info-row"><dt>Paradas sin servicio</dt><dd>Las paradas en las vías afectadas a la zona de exclusión: Av. Ricaldoni y Luis Morquio.</dd></div>
+    <div class="info-row"><dt>Paradas provisorias</dt><dd>Las paradas oficiales en las vías de desvío.</dd></div>
+    <div class="info-row"><dt>Si se satura el tránsito</dt><dd>Las líneas 143 (hacia el Centro), 494, 185, 186, 191, 328 y 329 están autorizadas a tomar el recorrido alternativo que figura en cada grupo.</dd></div>
+  </dl>
+
+  <footer>
+    <div>División Transporte · Unidad de Programación del Transporte Urbano (UPTU)</div>
+    <div>Edificio Anexo Soriano 1426, piso 5 · (598 2) 1950 8702/8712 · stc@imm.gub.uy</div>
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+{
+const GRUPOS = [
+  { chips:['76','192','316'], hora:'Desde 00:00', variantes:[
+    { label:'Hacia Pta. Carretas / P. Rodó / Pocitos', texto:'Centenario, Brito Foresti, Av. Italia (Túnel), Av. Italia, Avelino Miranda, Br. Artigas, Rivera, Soca a su ruta.' },
+    { label:'Hacia Cerro / Manga / Cno. Maldonado', texto:'Av. Brasil / Av. Rivera, Br. Artigas, Av. Italia, Centenario a ruta.' }
+  ]},
+  { chips:['143'], hora:'Desde 00:00', variantes:[
+    { label:'Hacia Buceo', texto:'L. A. de Herrera, 4 de Julio, Lasplaces, Ramón Anador a su ruta.' },
+    { label:'Hacia Centro / Paso de la Arena / Ruta 1', texto:'Ramón Anador, Las Heras, Av. Italia a ruta.', alt:'Washington Beltrán, Francisco Simón, Av. Italia a su ruta.' }
+  ]},
+  { chips:['494'], hora:'Desde 00:00', variantes:[
+    { label:'Hacia Buceo', texto:'Av. Italia, Las Heras, Ramón Anador a ruta.', alt:'Av. Italia, Magariños Cervantes, Ramón Anador a su ruta.', altLabel:'Si se satura Av. Italia y Las Heras' },
+    { label:'Hacia Centro / Paso de la Arena / Ruta 1', texto:'Ramón Anador, Las Heras, Av. Italia a ruta.', alt:'Washington Beltrán, Francisco Simón, Av. Italia a su ruta.' }
+  ]},
+  { chips:['185','186','191','328','329'], hora:'Desde 00:00', variantes:[
+    { label:'Hacia Pocitos / Pta. Carretas', texto:'Av. Italia, Luis A. de Herrera a su ruta.' },
+    { label:'Hacia Paso Molino / Mendoza / S. Bois', texto:'Ramón Anador, Las Heras, Av. Italia a ruta.', alt:'Washington Beltrán, Francisco Simón, Av. Italia a su ruta.' }
+  ]}
+];
+const CORTES = ['Brito del Pino y Av. Soca','Leonor Horticou entre Brito del Pino y Av. Soca','Brito del Pino y Av. Ricaldoni','Alarcón y Feliciano Rodríguez','Alarcón y Av. Ricaldoni','Diego Lamas y Av. Ricaldoni','Rafael Pastoriza y Feliciano Rodríguez','Rafael Pastoriza y Av. Ricaldoni','Francisco Llambí y Av. Ricaldoni','Mac Eachen y Vidal y Fuentes','Vidal y Fuentes y Av. Ricaldoni','Vidal y Fuentes y Manuel Alonso','Av. Cataluña y Av. Navarro','Av. Cataluña y Manuel Alonso','Av. Cataluña y Av. Ricaldoni','Av. Navarro y Gral. Las Heras','Av. Ramón Anador y Av. L. A. de Herrera','Av. Ramón Anador y Gral. Las Heras','Ayacucho y Gral. Las Heras','Av. Navarro y Talcahuano','Santiago Gadea y Las Heras','Av. Navarro y Santiago Gadea','Manuel Quintela y Gral. Las Heras','Manuel Quintela y Av. Dr. Alfredo Navarro','Atilio Narancio y Manuel Alonso','Atilio Narancio y Av. Ricaldoni','Av. Italia y Las Heras','Pte. Lorenzo Batlle esq. Bahía Blanca','Canning esq. Morales','Morquio atrás de la rotonda del Obelisco','Ponsomby esq. Prudencio de Pena','Av. Ponce esq. Av. Rivera (hacia el Estadio)','Av. Ponce esq. Pouey (hacia el Estadio)','Av. Ponce esq. Prudencio de Pena (corte de cantero)','Simón Bolívar esq. Av. Rivera','Simón Bolívar esq. Pouey','Simón Bolívar esq. Horticou','Av. Soca esq. Rivera'];
+const PARADAS = [
+  {c:3148,n:'Av. Dr. Americo Ricaldoni y Av. Italia',la:-34.891928,lo:-56.154172,l:['76','115','143','185','186','191','192','316','328','329','494','495']},
+  {c:553,n:'Av. Dr. Americo Ricaldoni y Av. Federico R Vidiella',la:-34.892023,lo:-56.154605,l:['76','143','185','186','191','192','316','328','329','494','495']},
+  {c:554,n:'Av. Dr. Americo Ricaldoni y Circ. Int Sin Denom.',la:-34.893292,lo:-56.152243,l:['76','143','185','186','191','192','316','328','329','494','495']},
+  {c:3147,n:'Av. Dr. Americo Ricaldoni y Av. Dr. Alfredo Navarro',la:-34.893297,lo:-56.151489,l:['76','143','185','186','191','192','316','328','329','494','495']},
+  {c:6974,n:'Av. Dr. Americo Ricaldoni y Av. Dr. Alfredo Navarro',la:-34.894061,lo:-56.151229,l:['BT1']},
+  {c:3063,n:'Av. Dr. Americo Ricaldoni y Dr. Atilio Narancio',la:-34.895316,lo:-56.151145,l:['76','140','192','316','328']},
+  {c:3062,n:'Av. Dr. Americo Ricaldoni y Dr. Alfredo Vidal y Fuentes',la:-34.896856,lo:-56.151101,l:['76','140','192','316']}
+];
+const ESTADIO = [-34.89445,-56.15283];
+
+const norm = s => s.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
+const esc = s => String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const input = document.getElementById('search');
+const lineas = [...new Set(GRUPOS.flatMap(g=>g.chips))];
+const texto = g => norm(g.chips.join(' ')+' '+g.variantes.map(v=>v.label+' '+v.texto+' '+(v.alt||'')).join(' '));
+
+document.getElementById('cortes').innerHTML = CORTES.map(c=>'<li>'+esc(c)+'</li>').join('');
+document.getElementById('stats').textContent = lineas.length + ' líneas con desvío · ' + CORTES.length + ' cruces cortados';
+const quick = document.getElementById('quick');
+quick.innerHTML = lineas.map(l=>'<button type="button" data-l="'+esc(l)+'" aria-pressed="false">'+esc(l)+'</button>').join('');
+quick.addEventListener('click', e=>{
+  const b = e.target.closest('button'); if(!b) return;
+  input.value = input.value.trim()===b.dataset.l ? '' : b.dataset.l;
+  render();
+});
+
+function render(){
+  const q = norm(input.value.trim());
+  const vis = GRUPOS.filter(g=>!q || texto(g).includes(q));
+  document.getElementById('groups').innerHTML = vis.map(g=>
+    '<div class="group"><div class="group-head"><div class="chips">' +
+    g.chips.map(c=>'<span class="chip'+(q && norm(c)===q?' match':'')+'">'+esc(c)+'</span>').join('') +
+    '</div><span class="time">'+esc(g.hora)+'</span></div><div class="variants">' +
+    g.variantes.map(v=>'<div><div class="variant-label">'+esc(v.label)+'</div><div class="variant-text">'+esc(v.texto)+'</div>' +
+      (v.alt?'<div class="alt"><b>'+esc(v.altLabel||'Si se satura Las Heras')+':</b> '+esc(v.alt)+'</div>':'')+'</div>').join('') +
+    '</div></div>').join('');
+  const empty = document.getElementById('empty');
+  empty.hidden = vis.length>0;
+  empty.textContent = 'Esa línea no tiene desvío por la final. Si pasa por Av. Ricaldoni, Luis Morquio o las calles cortadas, mirá el detalle más abajo.';
+  document.getElementById('search-count').textContent = q ? vis.length+' de '+GRUPOS.length : '';
+  quick.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed', norm(b.dataset.l)===q ? 'true':'false'));
+  pintarMapa(q);
+}
+
+let map=null, capa=null, marc={};
+function iniciarMapa(){
+  if(map) return true;
+  if(!window.L){ document.getElementById('map').hidden=true; document.getElementById('map-fallback').hidden=false; return false; }
+  map = L.map('map',{scrollWheelZoom:false});
+  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'});
+  const im = L.tileLayer.wms('https://montevideo.gub.uy/app/geoserver/wms',{layers:'mapstore-base:cb_v_sig_vias',format:'image/png',maxZoom:19,attribution:'Intendencia de Montevideo'});
+  osm.addTo(map);
+  const ric = PARADAS.filter(p=>p.c!==6974).map(p=>[p.la,p.lo]);
+  L.polyline(ric,{color:'#B3261E',weight:7,opacity:.55,dashArray:'10 8'}).bindPopup('<div class="pop-n">Av. Ricaldoni</div><div class="pop-l">Zona de exclusión, ambas sendas, desde las 00:00 del sábado</div>').addTo(map);
+  L.marker(ESTADIO,{icon:L.divIcon({className:'',html:'<div class="estadio">E</div>',iconSize:[28,28],iconAnchor:[14,14]}),title:'Estadio Centenario'}).bindPopup('<div class="pop-n">Estadio Centenario</div><div class="pop-l">Final: sábado 28, 17:00</div>').addTo(map);
+  capa = L.layerGroup().addTo(map);
+  return true;
+}
+function pintarMapa(q){
+  const lq = lineas.concat(PARADAS.flatMap(p=>p.l)).find(l=>norm(l)===q);
+  const ps = PARADAS.filter(p=>!lq || p.l.includes(lq));
+  document.getElementById('map-cap').innerHTML = lq
+    ? 'Línea <b>'+esc(lq)+'</b>: <b>'+ps.length+'</b> paradas sin servicio sobre Ricaldoni. Borrá la búsqueda para ver todas.'
+    : '<b>'+ps.length+'</b> paradas sobre Av. Ricaldoni quedan sin servicio. Las de Luis Morquio también están suprimidas. Tocá una para ver qué líneas paran ahí.';
+  document.getElementById('stops-sum').textContent = 'Ver la lista de paradas ('+ps.length+')';
+  document.getElementById('stops-body').innerHTML = ps.length ? '<div class="tramo">'+ps.map(p=>
+    '<div class="stop-row"><span class="stop-cod">'+p.c+'</span><div><button type="button" data-c="'+p.c+'">'+esc(p.n)+'</button><div class="stop-lines">'+esc(p.l.join(' · '))+'</div></div></div>').join('')+'</div>' : '';
+  if(!iniciarMapa()) return;
+  capa.clearLayers(); marc={};
+  const col = getComputedStyle(document.documentElement).getPropertyValue('--stop').trim()||'#D0342C';
+  ps.forEach(p=>{
+    marc[p.c] = L.circleMarker([p.la,p.lo],{radius:7,color:'#fff',weight:2,fillColor:col,fillOpacity:1})
+      .bindPopup('<div class="pop-n">'+esc(p.n)+'</div><div class="pop-m">Sin servicio · '+p.c+'</div><div class="pop-l">Líneas: '+esc(p.l.join(' · '))+'</div>',{maxWidth:260}).addTo(capa);
+  });
+  map.invalidateSize();
+  const pts = ps.map(p=>[p.la,p.lo]).concat([ESTADIO]);
+  map.fitBounds(L.latLngBounds(pts),{padding:[30,30],maxZoom:16});
+}
+document.getElementById('stops-body').addEventListener('click', e=>{
+  const b = e.target.closest('button[data-c]'); const m = b && marc[b.dataset.c]; if(!m) return;
+  document.getElementById('map').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});
+  map.setView(m.getLatLng(),17); m.openPopup();
+});
+document.getElementById('to-map').addEventListener('click',()=>{
+  document.querySelector('.map-card').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
+  if(map) setTimeout(()=>map.invalidateSize(),300);
+});
+input.addEventListener('input', render);
+render();
+}
+</script>
+</body></html>

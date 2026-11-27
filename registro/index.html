@@ -172,7 +172,7 @@
     <div id="mapa-general" class="mapa"></div>
     <div class="ley">
       <span><i class="linea" style="background:#b91c1c"></i>Tramo cortado (calle principal)</span>
-      <span><i style="background:#b91c1c;border:2px solid #fff;box-shadow:0 0 0 1px #b91c1c"></i>Parada suspendida</span>
+      <span><i style="background:#b91c1c;border:2px solid #fff;box-shadow:0 0 0 1px #b91c1c"></i>Parada suspendida (borde con el color del desvío)</span>
       <span><i class="linea" style="background:#f59e0b"></i>Paradas suspendidas en un tramo</span>
       <span><i class="linea" style="background:repeating-linear-gradient(90deg,#2563eb 0 8px,transparent 8px 12px)"></i>Recorrido del desvío (color de cada desvío)</span>
       <span class="muted">Clic en cada elemento para ver el detalle.</span>
@@ -1314,7 +1314,8 @@ function dibujarDesvio(capa, d, g, color, conPopup=true){
       capas.push(L.polyline(p.coords, { color:'#f59e0b', weight:6, opacity:.85 })
         .bindPopup(pop + `<br><b>Paradas suspendidas:</b> ${esc(p.texto)}`));
     } else {
-      capas.push(L.circleMarker(p.coords[0], { radius:8, color:'#fff', weight:2, fillColor:color || '#b91c1c', fillOpacity:1 })
+      // Parada suspendida: siempre roja (en el mapa general, el borde lleva el color del desvío)
+      capas.push(L.circleMarker(p.coords[0], { radius:8, color: color || '#fff', weight: color ? 3 : 2, fillColor:'#b91c1c', fillOpacity:1 })
         .bindTooltip(esc(p.texto)).bindPopup(pop + `<br><b>Parada suspendida:</b> ${esc(p.texto)}`));
       capas.push(L.circleMarker(p.coords[0], { radius:3, stroke:false, fillColor:'#fff', fillOpacity:1, interactive:false }));
     }

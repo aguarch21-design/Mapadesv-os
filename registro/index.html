@@ -174,6 +174,7 @@
       <span><i class="linea" style="background:#b91c1c"></i>Tramo cortado (calle principal)</span>
       <span><i style="background:#b91c1c;border:2px solid #fff;box-shadow:0 0 0 1px #b91c1c"></i>Parada suspendida</span>
       <span><i class="linea" style="background:#f59e0b"></i>Paradas suspendidas en un tramo</span>
+      <span><i class="linea" style="background:repeating-linear-gradient(90deg,#2563eb 0 8px,transparent 8px 12px)"></i>Recorrido del desvío (color de cada desvío)</span>
       <span class="muted">Clic en cada elemento para ver el detalle.</span>
     </div>
   </section>
@@ -230,7 +231,7 @@
         <div class="campo full"><label>Observaciones</label><textarea id="c-obs" rows="4" placeholder="Recorrido alternativo, paradas provisorias, detalle de paradas…"></textarea></div>
         <div class="campo full"><label>Ubicación en el mapa</label>
           <div id="c-mapa" class="mapa" style="height:260px;margin-top:0"></div>
-          <span class="ayuda" id="c-mapa-estado">Aparece solo al subir el comunicado: calle cortada en rojo y paradas suspendidas.</span></div>
+          <span class="ayuda" id="c-mapa-estado">Aparece solo al subir el comunicado: calle cortada en rojo, paradas suspendidas y recorrido en azul.</span></div>
       </div>
       <div class="acciones">
         <button class="btn-sec" id="c-cancelar">Cancelar</button>
@@ -1071,7 +1072,7 @@ async function candidatosParada(texto){
   const entre = limpio.match(/^(.+?)\s+entre\s+(.+?)\s+(?:y|e|-|\/\/)\s+(.+)$/i);
   if(entre){
     const [x, y] = await Promise.all([buscarCruce(entre[1], entre[2]), buscarCruce(entre[1], entre[3])]);
-    if(x.length && y.length) return { tipo:'tramo', opciones:[x, y] };
+    if(x.length && y.length) return { tipo:'tramo', opciones:[x, y], calle: entre[1] };
   }
   const esq = limpio.match(/^(.+?)\s+(?:esq(?:uina)?\.?|esquina\s+con)\s+(.+)$/i);
   if(esq){
@@ -1089,18 +1090,166 @@ async function candidatosParada(texto){
 
 const dist2 = (a, b) => (a[0]-b[0])**2 + (a[1]-b[1])**2;
 
+
+/* ---- Ejes de calles (capa cb_v_sig_vias): cruces que faltan y trazado real ---- */
+const metros = (a, b) => Math.hypot((a[0]-b[0]) * 110540, (a[1]-b[1]) * 111320 * Math.cos(a[0] * Math.PI/180));
+const CACHE_EJES = {};
+async function ejesCalle(nombre, centro, radio){       // radio en grados (~0,01 = 1,1 km)
+  const p = patronCalle(nombre); if(!p) return [];
+  const bb = [centro[1]-radio*1.2, centro[0]-radio, centro[1]+radio*1.2, centro[0]+radio].map(x => x.toFixed(5));
+  const clave = p + '|' + bb.join(',');
+  if(CACHE_EJES[clave]) return CACHE_EJES[clave];
+  const feats = await wfs('mapstore-base:cb_v_sig_vias', `nom_calle ILIKE '${p}' AND BBOX(the_geom,${bb.join(',')},'EPSG:4326')`, 500);
+  const lineas = [];
+  for(const f of feats){
+    const g = f.geometry; if(!g) continue;
+    const partes = g.type === 'MultiLineString' ? g.coordinates : [g.coordinates];
+    for(const l of partes) lineas.push(l.map(c => [c[1], c[0]]));
+  }
+  return CACHE_EJES[clave] = lineas;
+}
+function puntoMasCercanoEnSegmento(p, a, b){
+  const k = Math.cos(p[0] * Math.PI/180);
+  const ax = a[1]*k, ay = a[0], bx = b[1]*k, by = b[0], px = p[1]*k, py = p[0];
+  const dx = bx-ax, dy = by-ay, L = dx*dx + dy*dy;
+  const t = L ? Math.max(0, Math.min(1, ((px-ax)*dx + (py-ay)*dy) / L)) : 0;
+  return [ay + t*dy, (ax + t*dx) / k];
+}
+// Cruce calculado entre dos calles: donde se tocan o donde quedan más cerca (hasta maxM metros)
+async function cruceCalculado(a, b, centro, maxM=120){
+  const [la, lb] = await Promise.all([ejesCalle(a, centro, 0.02), ejesCalle(b, centro, 0.02)]);
+  let mejor = null;
+  for(const l1 of la) for(let i=0;i<l1.length-1;i++) for(const l2 of lb) for(let j=0;j<l2.length-1;j++){
+    for(const [p, s1, s2] of [[l1[i], l2[j], l2[j+1]], [l1[i+1], l2[j], l2[j+1]], [l2[j], l1[i], l1[i+1]], [l2[j+1], l1[i], l1[i+1]]]){
+      const q = puntoMasCercanoEnSegmento(p, s1, s2), d = metros(p, q);
+      if(!mejor || d < mejor.d) mejor = { d, ll:[(p[0]+q[0])/2, (p[1]+q[1])/2] };
+    }
+  }
+  return mejor && mejor.d <= maxM ? [{ ll: mejor.ll, puntaje:0, aprox:true }] : [];
+}
+async function buscarCruceCompleto(a, b, centro){
+  const r = await buscarCruce(a, b);
+  if(r.length || !centro) return r;
+  try { return await cruceCalculado(a, b, centro); } catch(e) { return []; }
+}
+// Camino siguiendo el eje de la calle entre dos puntos (si no se puede, línea recta)
+async function trazarPorCalle(calle, A, B){
+  const recta = metros(A, B);
+  if(recta < 25) return [A, B];
+  try{
+    const centro = [(A[0]+B[0])/2, (A[1]+B[1])/2];
+    const radio = Math.min(0.03, Math.max(0.004, Math.abs(A[0]-B[0]) + Math.abs(A[1]-B[1])));
+    const lineas = await ejesCalle(calle, centro, radio);
+    if(!lineas.length) return [A, B];
+    const key = (p) => p[0].toFixed(6) + ',' + p[1].toFixed(6);
+    const nodos = new Map(), ady = new Map();
+    const nodo = (p) => { const k = key(p); if(!nodos.has(k)){ nodos.set(k, p); ady.set(k, []); } return k; };
+    for(const l of lineas) for(let i=0;i<l.length-1;i++){
+      const u = nodo(l[i]), v = nodo(l[i+1]), w = metros(l[i], l[i+1]);
+      ady.get(u).push([v, w]); ady.get(v).push([u, w]);
+    }
+    const masCercano = (P) => { let best=null, bd=Infinity; for(const [k, p] of nodos){ const d = metros(P, p); if(d < bd){ bd = d; best = k; } } return [best, bd]; };
+    const [s, ds] = masCercano(A), [t, dt] = masCercano(B);
+    if(ds > 80 || dt > 80) return [A, B];
+    const dist = new Map([[s, 0]]), prev = new Map(), hechos = new Set();
+    while(true){
+      let u = null, du = Infinity;
+      for(const [k, d] of dist) if(!hechos.has(k) && d < du){ du = d; u = k; }
+      if(u === null || u === t) break;
+      hechos.add(u);
+      for(const [v, w] of ady.get(u)){ if(du + w < (dist.get(v) ?? Infinity)){ dist.set(v, du + w); prev.set(v, u); } }
+    }
+    if(!dist.has(t) || dist.get(t) > recta * 3 + 200) return [A, B];
+    const camino = []; for(let k = t; k; k = prev.get(k)){ camino.unshift(nodos.get(k)); if(k === s) break; }
+    return [A, ...camino, B].filter((p, i, arr) => i === 0 || metros(p, arr[i-1]) > 1);
+  }catch(e){ return [A, B]; }
+}
+
+// Recorridos escritos como lista de calles: "Hacia Pocitos: Canelones, Ejido – Soriano … a su ruta"
+const ABREV = '(?:Av|Avda|Bv|Bvar|Br|Pta|Dr|Dra|Gral|Psje|Pje|Ing|Prof|Cno|Sta|Sto|Cnel|Tte|Mcal|Ctrio|Pte|Sr|Pbro|Arq|Esc|[A-ZÁÉÍÓÚÑ])';
+const RE_FIN_FRASE = new RegExp('(?<!\\b' + ABREV + ')\\.\\s+', 'g');
+function extraerRecorridos(obs){
+  const out = [];
+  for(const linea of String(obs || '').split(/\n+/)){
+    if(/^\s*(hora|horario|paradas?|provisorias?|observaci|v[ií]as?\s+principal|modificado|calle|entre|fecha|motivo)\b/i.test(linea)) continue;
+    const marcado = linea.replace(/\ba\s+(?:su|sus)\s+rutas?(?:\s+habitual(?:es)?)?\.?/gi, '§').replace(/\ba\s+ruta\.?/gi, '§');
+    for(const frase of marcado.split('§').flatMap(f => f.split(RE_FIN_FRASE))){
+      const i = frase.lastIndexOf(':');
+      const cab = i >= 0 ? frase.slice(0, i) : '';
+      let lista = (i >= 0 ? frase.slice(i+1) : frase).replace(/\([^)]*\)/g, ' ').replace(/[*"“”]/g, ' ');
+      const calles = lista.split(/\s+[–-]\s*|\s*[–-]\s+|\s*,\s*/)
+        .map(c => c.split('/')[0].replace(/\.\s*$/, '').replace(/^\s*(y|e)\s+/i, '').replace(/\s+/g, ' ').trim())
+        .filter(c => c.length > 2 && /[a-záéíóúñ]/i.test(c) && !/\b(entre|esq|esquina|giro|corte|desv)/i.test(c));
+      if(calles.length < 2) continue;
+      const etiqueta = cab.slice(cab.lastIndexOf(':') + 1).trim();
+      out.push({ etiqueta, calles: calles.slice(0, 14) });
+    }
+  }
+  return out.slice(0, 8);
+}
+async function geocodificarRecorrido(r, ref){
+  let calles = r.calles.filter((c, i) => i === 0 || sinTildes(c) !== sinTildes(r.calles[i-1]));   // giro en U: misma calle dos veces
+  let cands = await Promise.all(calles.slice(0, -1).map((c, i) => buscarCruce(c, calles[i+1]).catch(() => [])));
+  // Referencia: la zona del desvío o, si no hay, la primera esquina encontrada del propio recorrido
+  const ref2 = ref || (cands.find(c => c.length) || [])[0]?.ll || null;
+  const cruce = (a, b) => buscarCruceCompleto(a, b, ref2).catch(() => []);
+  cands = await Promise.all(cands.map((c, i) => c.length ? c : cruce(calles[i], calles[i+1])));
+  // "Minas Colonia": dos calles sin separador → probar a partirlas
+  for(let i = cands.length-1; i >= 0; i--){
+    if(cands[i].length) continue;
+    const pal = calles[i+1].split(' ');
+    for(let k = 1; k < pal.length; k++){
+      const izq = pal.slice(0, k).join(' '), der = pal.slice(k).join(' ');
+      const [c1, c2] = await Promise.all([cruce(calles[i], izq), cruce(izq, der)]);
+      if(c1.length && c2.length){ calles.splice(i+1, 1, izq, der); cands.splice(i, 1, c1, c2); break; }
+    }
+  }
+  const faltan = cands.map((c, i) => c.length ? null : `${calles[i]} y ${calles[i+1]}`).filter(Boolean);
+  // Elegir cada esquina cerca de la anterior y unir siguiendo la calle común
+  const tramos = []; let actual = []; let prev = ref2, prevIdx = null;
+  const cerrar = () => { if(actual.length >= 2) tramos.push(actual); actual = []; prevIdx = null; };
+  for(let i = 0; i < cands.length; i++){
+    const c = cands[i]; if(!c.length) continue;
+    const ok = c.reduce((best, x) => (!prev || dist2(x.ll, prev) < dist2(best.ll, prev)) ? x : best);
+    if(prev && dist2(ok.ll, prev) > (actual.length ? 0.015 : 0.03)**2){   // >1,5 km del punto anterior
+      cerrar();
+      if(dist2(ok.ll, ref2 || ok.ll) > 0.03**2) continue;                   // otro lugar de la ciudad con el mismo nombre
+    }
+    if(actual.length && prevIdx === i-1){
+      const via = await trazarPorCalle(calles[i], actual[actual.length-1], ok.ll);   // calle común a las dos esquinas
+      for(const p of via.slice(1)) if(metros(p, actual[actual.length-1]) > 1) actual.push(p);
+    } else actual.push(ok.ll);
+    prev = ok.ll; prevIdx = i;
+  }
+  cerrar();
+  return { texto: r.etiqueta || 'Recorrido', calles, tramos, faltan };
+}
+
+
 // Ubica todo lo de un desvío. Devuelve { zona, paradas:[{texto,tipo,coords}], sinUbicar:[] }
 async function geocodificarDesvio(d){
   const items = [];   // { texto, tipo, opciones:[[cands],[cands]?], esZona }
+  // Tramos cortados: del título "Calle (A // B)" y de textos "X desde A hasta B" / "Vías principales: X entre A y B"
+  const tramos = [];
   const t = d.titulo.match(/^(.+?)\s*\((.+?)\)/);
   if(t){
     const partes = t[2].split(/\s*(?:\/\/|\s-\s|–|\s+y\s+)\s*/).filter(Boolean);
-    if(partes.length === 2){
-      try {
-        const [x, y] = await Promise.all([buscarCruce(t[1], partes[0]), buscarCruce(t[1], partes[1])]);
-        if(x.length && y.length) items.push({ texto: t[1].trim() + ' entre ' + partes.join(' y '), tipo:'tramo', opciones:[x, y], esZona:true });
-      } catch(e) {}
-    }
+    if(partes.length === 2) tramos.push([t[1], partes[0], partes[1]]);
+  }
+  for(let seg of String(d.observaciones || '').split(/[;\n]+/)){
+    seg = seg.trim();
+    const conEtiqueta = /^(v[ií]as?\s+principal(es)?|calles?\s+principal(es)?|cortes?|tramos?\s+cortados?)\s*:/i.test(seg);
+    seg = seg.replace(/^[^:]{0,30}:\s*/, '').replace(/^[-–•]\s*/, '').replace(/\s*\(.*$/, '').replace(/\.\s*$/, '').trim();
+    if(/\b(hs|horas?|horario)\b/i.test(seg)) continue;
+    let m = seg.match(/^(.{3,60}?)\s+desde\s+(.{2,60}?)\s+hasta\s+(.{2,60})$/i);
+    if(!m && conEtiqueta) m = seg.match(/^(.{3,60}?)\s+entre\s+(.{2,60}?)\s+(?:y|e)\s+(.{2,60})$/i);
+    if(m) tramos.push([m[1], m[2], m[3]]);
+  }
+  for(const [calle, a, b] of tramos.slice(0, 6)){
+    try {
+      const [x, y] = await Promise.all([buscarCruce(calle, a), buscarCruce(calle, b)]);
+      if(x.length && y.length) items.push({ texto: `${calle.trim()} entre ${a.trim()} y ${b.trim()}`, tipo:'tramo', opciones:[x, y], esZona:true, calle });
+    } catch(e) {}
   }
   const sinUbicar = [];
   for(const p of (d.paradas_suspendidas || [])){
@@ -1115,21 +1264,32 @@ async function geocodificarDesvio(d){
   if(!ref && items.length){
     const o = items[0].opciones[0]; ref = o[0].ll;
   }
-  const res = { v:1, zona:null, paradas:[], sinUbicar };
+  const res = { v:4, zonas:[], paradas:[], recorridos:[], sinUbicar, esquinasFaltantes:[] };
   for(const it of items){
-    const coords = it.opciones.map(o => (o.length === 1 || !ref) ? o[0].ll : o.reduce((best, c) => dist2(c.ll, ref) < dist2(best.ll, ref) ? c : best).ll);
-    if(it.esZona) res.zona = { texto: it.texto, coords };
+    let coords = it.opciones.map(o => (o.length === 1 || !ref) ? o[0].ll : o.reduce((best, c) => dist2(c.ll, ref) < dist2(best.ll, ref) ? c : best).ll);
+    if(it.tipo === 'tramo' && coords.length === 2 && it.calle) coords = await trazarPorCalle(it.calle, coords[0], coords[1]);
+    if(it.esZona) res.zonas.push({ texto: it.texto, coords });
     else res.paradas.push({ texto: it.texto, tipo: it.tipo, coords });
+  }
+  // Recorridos alternativos (referencia: la zona del desvío)
+  const pts = [...res.zonas.flatMap(z => z.coords), ...res.paradas.flatMap(p => p.coords)];
+  const refR = pts.length ? [pts.reduce((s,p)=>s+p[0],0)/pts.length, pts.reduce((s,p)=>s+p[1],0)/pts.length] : null;
+  for(const r of extraerRecorridos(d.observaciones)){
+    try {
+      const g = await geocodificarRecorrido(r, refR);
+      if(g.tramos.length) res.recorridos.push(g);
+      g.faltan.forEach(f => res.esquinasFaltantes.push(f));
+    } catch(e) {}
   }
   return res;
 }
 
 async function geoDe(d){
-  if(d.geo && d.geo.v === 1) return d.geo;
+  if(d.geo && d.geo.v === 4) return d.geo;
   const g = await geocodificarDesvio(d);
   d.geo = g;
   // Guardar para la próxima (solo usuarios con permiso de edición)
-  if(S.user && (g.zona || g.paradas.length)) sb.from(CONFIG.TABLA).update({ geo: g }).eq('id', d.id).then(() => {});
+  if(S.user && (g.zonas.length || g.paradas.length || g.recorridos.length)) sb.from(CONFIG.TABLA).update({ geo: g }).eq('id', d.id).then(() => {});
   return g;
 }
 
@@ -1137,10 +1297,17 @@ function dibujarDesvio(capa, d, g, color, conPopup=true){
   const pop = `<b>${esc(d.titulo)}</b><br>Líneas ${esc((d.lineas||[]).join(', '))}<br>` +
               `Del ${fmt(d.fecha_inicio)} al ${d.fecha_fin ? fmt(d.fecha_fin) : 'nuevo aviso'}`;
   const capas = [];
-  if(g.zona){
-    capas.push(L.polyline(g.zona.coords, { color:'#b91c1c', weight:7, opacity:.75 })
-      .bindPopup(pop + `<br><i>Tramo cortado: ${esc(g.zona.texto)}</i>`));
-    if(color) capas.push(L.polyline(g.zona.coords, { color, weight:2, opacity:1, dashArray:'4 4' }));
+  for(const r of (g.recorridos || [])){
+    for(const tr of r.tramos){
+      capas.push(L.polyline(tr, { color: color || '#2563eb', weight:4, opacity:.9, dashArray: color ? '10 6' : null })
+        .bindTooltip(esc(r.texto)).bindPopup(pop + `<br><b>Recorrido ${esc(r.texto)}:</b> ${esc(r.calles.join(' – '))}`));
+      capas.push(L.circleMarker(tr[tr.length-1], { radius:4, color: color || '#2563eb', weight:2, fillColor:'#fff', fillOpacity:1, interactive:false }));
+    }
+  }
+  for(const z of (g.zonas || [])){
+    capas.push(L.polyline(z.coords, { color:'#b91c1c', weight:7, opacity:.75 })
+      .bindPopup(pop + `<br><i>Tramo cortado: ${esc(z.texto)}</i>`).bindTooltip(esc(z.texto)));
+    if(color) capas.push(L.polyline(z.coords, { color, weight:2, opacity:1, dashArray:'4 4' }));
   }
   for(const p of g.paradas){
     if(p.tipo === 'tramo'){
@@ -1172,15 +1339,17 @@ async function mostrarMapaDetalle(d){
     const capas = dibujarDesvio(CAPA_DET, d, g, null);
     if(capas.length) MAPA_DET.fitBounds(L.featureGroup(capas).getBounds().pad(0.35), { maxZoom:17 });
     est.textContent = !capas.length ? 'No se pudo ubicar este desvío en el mapa (no tiene calle o paradas reconocibles).'
-      : g.sinUbicar.length ? `No se ubicó: ${g.sinUbicar.join(' · ')}` : '';
+      : [g.sinUbicar.length ? `No se ubicó: ${g.sinUbicar.join(' · ')}` : '', textoFaltantes(g)].filter(Boolean).join(' · ');
   }catch(e){
     console.error(e); est.textContent = 'No se pudo consultar el mapa de la IM en este momento.';
   }
 }
 
+const textoFaltantes = (g) => (g.esquinasFaltantes||[]).length
+  ? `Recorrido: estas calles no se cruzan, revisá si falta una calle en el medio o un separador: ${g.esquinasFaltantes.join(' · ')}` : '';
 // Vista previa en el formulario de carga
 var MAPA_FORM = null, CAPA_FORM = null; let FORM_TOKEN = 0;
-const claveMapaForm = () => $('c-titulo').value.trim() + '|' + listaDeTexto($('c-paradas').value).join('|');
+const claveMapaForm = () => $('c-titulo').value.trim() + '|' + listaDeTexto($('c-paradas').value).join('|') + '|' + $('c-obs').value.trim();
 async function previsualizarMapa(){
   if(!window.L) return;
   if(!MAPA_FORM){ MAPA_FORM = crearMapa('c-mapa'); CAPA_FORM = L.layerGroup().addTo(MAPA_FORM); window.CAPA_FORM = CAPA_FORM; }
@@ -1188,7 +1357,7 @@ async function previsualizarMapa(){
   const clave = claveMapaForm();
   const d = { id:'previa', titulo: $('c-titulo').value.trim(), lineas: listaDeTexto($('c-lineas').value),
               fecha_inicio: aISO($('c-inicio').value) || hoyISO(), fecha_fin: aISO($('c-fin').value) || null,
-              paradas_suspendidas: listaDeTexto($('c-paradas').value) };
+              paradas_suspendidas: listaDeTexto($('c-paradas').value), observaciones: $('c-obs').value };
   CAPA_FORM.clearLayers();
   if(!d.titulo && !d.paradas_suspendidas.length){ $('c-mapa-estado').textContent = 'Aparece solo al subir el comunicado: calle cortada en rojo y paradas suspendidas.'; return; }
   const token = ++FORM_TOKEN;
@@ -1201,7 +1370,9 @@ async function previsualizarMapa(){
     if(capas.length) MAPA_FORM.fitBounds(L.featureGroup(capas).getBounds().pad(0.35), { maxZoom:17 });
     $('c-mapa-estado').textContent = !capas.length
       ? 'No se pudo ubicar en el mapa. Revisá que la calle del título y las paradas estén escritas como "Calle esq. Calle".'
-      : g.sinUbicar.length ? `Ubicado. No se encontró: ${g.sinUbicar.join(' · ')}` : 'Ubicado. Si algo quedó mal, corregí el texto de la parada y se actualiza solo.';
+      : (g.sinUbicar.length || (g.esquinasFaltantes||[]).length)
+        ? 'Ubicado, con avisos. ' + [g.sinUbicar.length ? `No se encontró: ${g.sinUbicar.join(' · ')}` : '', textoFaltantes(g)].filter(Boolean).join(' · ')
+        : 'Ubicado. Si algo quedó mal, corregí el texto y se actualiza solo.';
   }catch(e){
     if(token === FORM_TOKEN) $('c-mapa-estado').textContent = 'No se pudo consultar el mapa de la IM en este momento (se puede guardar igual).';
   }
@@ -1279,7 +1450,7 @@ $('mes-hoy').onclick = () => { S.mes = new Date(); S.mes.setDate(1); renderCalen
 ['f-linea','f-fecha','f-texto','f-estado'].forEach(id => $(id).addEventListener('input', renderListado));
 $('f-limpiar').onclick = () => { ['f-linea','f-fecha','f-texto','f-estado'].forEach(id => $(id).value=''); renderListado(); };
 $('btn-ics').onclick = exportarICS;
-let _cMap; ['c-titulo','c-paradas'].forEach(id => $(id).addEventListener('input', () => { clearTimeout(_cMap); _cMap = setTimeout(previsualizarMapa, 900); }));
+let _cMap; ['c-titulo','c-paradas','c-obs'].forEach(id => $(id).addEventListener('input', () => { clearTimeout(_cMap); _cMap = setTimeout(previsualizarMapa, 900); }));
 $('m-hoy').onclick = () => { $('m-fecha').value = aTexto(hoyISO()); mostrarMapaGeneral(); };
 $('m-fecha').addEventListener('input', () => { if(aISO($('m-fecha').value)) mostrarMapaGeneral(); });
 let _mLin; $('m-linea').addEventListener('input', () => { clearTimeout(_mLin); _mLin = setTimeout(mostrarMapaGeneral, 400); });

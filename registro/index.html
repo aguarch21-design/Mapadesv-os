@@ -1271,7 +1271,7 @@ async function geocodificarDesvio(d){
   if(!ref && items.length){
     const o = items[0].opciones[0]; ref = o[0].ll;
   }
-  const res = { v:4, zonas:[], paradas:[], recorridos:[], sinUbicar, esquinasFaltantes:[] };
+  const res = { v:5, zonas:[], paradas:[], recorridos:[], sinUbicar, esquinasFaltantes:[] };
   for(const it of items){
     let coords = it.opciones.map(o => (o.length === 1 || !ref) ? o[0].ll : o.reduce((best, c) => dist2(c.ll, ref) < dist2(best.ll, ref) ? c : best).ll);
     if(it.tipo === 'tramo' && coords.length === 2 && it.calle) coords = await trazarPorCalle(it.calle, coords[0], coords[1]);
@@ -1292,7 +1292,7 @@ async function geocodificarDesvio(d){
 }
 
 async function geoDe(d){
-  if(d.geo && d.geo.v === 4) return d.geo;
+  if(d.geo && d.geo.v === 5) return d.geo;
   const g = await geocodificarDesvio(d);
   d.geo = g;
   // Guardar para la próxima (solo usuarios con permiso de edición)
